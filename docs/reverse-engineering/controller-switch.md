@@ -64,9 +64,21 @@ The buff log confirmed the skill/name resolver and whitelist ready, with no Buff
 warnings/errors. Pre-existing level-table startup assertions were also present
 before installation and are not attributed to this change.
 
-This establishes the reported visual case on the review base. The upstream 1.1.0
-port has not been installed or live-tested. Logs do not emit per-switch events,
-so they confirm build identity and initialization rather than an internal branch.
-Exhaustive active/resource buffs, expiry/recast, repeated switches, leave/rejoin,
-performance and cached-tree reuse without reserve reset remain unverified live.
-Unknown native text storage continues to be refused by the existing guards.
+### Live, upstream 1.1.0 port
+
+The reporter subsequently tested the 1.1.0 build from PR commit
+`b84aaac38c538fc16785d4fd1cd71deb136e9ae3` and confirmed switching both ways
+between controller and keyboard/mouse looks correct. Read-only process inspection
+confirmed the mod-scoped DLL loaded in the running game. Its SHA-256 matched the
+built PR candidate:
+`1936dde0a4c28677d4c3229066890dd7815910160b79267523670097179b9e17`.
+The current loader log identifies Buff HUD 1.1.0; the buff log records successful
+initialization, skill/name resolution and 53 enabled whitelist definitions, with
+no Buff HUD warnings or errors. Existing unrelated startup diagnostics remain.
+
+This establishes the reported visual switching case on both the review base and
+upstream 1.1.0 port. Logs do not emit per-switch events, so they confirm build
+identity and initialization rather than an internal branch. Exhaustive
+active/resource buffs, expiry/recast, repeated switches, leave/rejoin, performance
+and cached-tree reuse without reserve reset remain unverified live. Unknown
+native text storage continues to be refused by the existing guards.
