@@ -2,6 +2,11 @@
 
 A standalone 3×7 temporary-buff HUD and countdown tracker.
 
+This fork releases the controller/keyboard switching fix submitted in
+[upstream PR #8](https://github.com/Lukaszpg/d2rl-buff-hud/pull/8).
+The fix keeps buff icons, countdowns, and empty-slot visibility consistent when
+the game recreates the HUD after an input-mode switch.
+
 ## Acknowledgements
 
 Many thanks to [RuffnecKk](https://github.com/RuffDood) for being a great teacher and awesome dude.
@@ -38,7 +43,7 @@ Custom buffs are supported through the same table: add the mod's state ID and an
 
 ## Installation
 
-Build from source or head to [releases](https://github.com/Lukaszpg/d2rl-buff-hud/releases). Copy **both** `d2rl-buff-panel.dll` and `d2rl-buff-panel.mpq` into one plugin scope:
+Build from source or get the [fork releases](https://github.com/Pyre-Flies/d2rl-buff-hud/releases). Copy **both** `d2rl-buff-panel.dll` and `d2rl-buff-panel.mpq` into one plugin scope:
 
 ```text
 <game>/mods/<mod-name>/d2rloader/plugins/

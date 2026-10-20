@@ -1,6 +1,6 @@
 # Buff HUD changelog
 
-## Unreleased
+## 1.1.1 - 2026-10-20
 - Keep buff icons and countdowns consistent when switching between controller and keyboard/mouse; hide empty slots after native UI resets.
 
 ## 1.0.11 — companion-MPQ reconciliation and production cleanup (2026-09-29)
