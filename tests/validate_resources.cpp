@@ -14,17 +14,19 @@ static std::string Read(const char* path) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 3) return 2;
+    if (argc != 2 && argc != 3) return 2;
     try {
         auto layout = Read(argv[1]);
-        auto table = Read(argv[2]);
+        auto table = argc == 3
+            ? Read(argv[2])
+            : std::string(BuffPanel::Systems::BuffTracker::LooseBuffHud::DefaultCatalogTsv);
         std::string error;
         if (!BuffPanel::Systems::BuffHud::LooseLayout::Validate(layout, error)
             || !BuffPanel::Systems::BuffTracker::LooseBuffHud::ValidateAndNormalize(table, error)) {
             std::cerr << error << '\n';
             return 1;
         }
-        std::cout << "PASS: companion layout and buff table\n";
+        std::cout << "PASS: companion layout and default buff catalog\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

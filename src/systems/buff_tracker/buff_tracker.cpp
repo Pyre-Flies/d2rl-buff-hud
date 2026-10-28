@@ -1,4 +1,5 @@
 #include "buff_tracker.hpp"
+#include "loose_buff_hud.hpp"
 #include "timer_metadata.hpp"
 
 #include "core/buff_display_bus.hpp"
@@ -17,7 +18,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -30,38 +30,28 @@ namespace {
 using GetGameFromUnitFn = void*(__fastcall*)(void* unit) noexcept;
 using GetStatListFromUnitAndStateFn = void*(__fastcall*)(void* unit, std::int32_t state) noexcept;
 
-// StatList semantic field layout is runtime-qualified on D2R build 93847. buff-hud.txt is the authoritative whitelist and
-// also declares how each state is presented: finite timer or resource pool.
-// Native CURSE lists remain excluded as a safety boundary. Timer rows require
-// finite future expiry metadata. Native skill ID is preferred; timer skill_id
-// is an optional fallback when the StatList exposes skill=0. skillLevel is not
-// used for qualification. Resource rows read their current/max values through
-// the already-owned Core unit-stat reader and do not require an expiry.
+// StatList semantic field layout is runtime-qualified on D2R build 93847. The
+// runtime catalog is derived directly from the active mod's Excel files
+// (states.txt, skills.txt, itemstatcost.txt), with optional loose buff-hud.txt
+// override support, and declares how each state is presented: finite timer or
+// resource pool. Native CURSE lists remain excluded as a safety boundary. Timer
+// rows require finite future expiry metadata. Native skill ID is preferred;
+// timer skill_id is an optional fallback when the StatList exposes skill=0.
+// skillLevel is not used for qualification. Resource rows read their
+// current/max values through the already-owned Core unit-stat reader and do not
+// require an expiry.
 constexpr std::uint32_t UnitTypeOffset = 0x00;
 constexpr std::uint32_t PlayerUnitType = 0;
 constexpr std::uint32_t StatListCurseFlag = 0x00000020u;
 constexpr std::uint32_t SharedStashProxyState = 186u; // states.txt: sharedstash; D2RLoader 1.3 proxy marker
 
 const D2RL::PluginContext* Context{};
-const D2RL::CustomTableService* CustomTables{};
 const D2RL::ThreadService* Threads{};
 const D2RL::LifecycleService* Lifecycle{};
 GetGameFromUnitFn GetGameFromUnit{};
 GetStatListFromUnitAndStateFn GetStatListFromUnitAndState{};
-D2RL::CustomTables::TableHandle BuffHudTable{D2RL::CustomTables::InvalidHandle};
 D2RL::Lifecycle::ListenerHandle DataTablesListener{D2RL::Lifecycle::InvalidHandle};
 std::array<D2RL::Lifecycle::ListenerHandle, 3> GameplayListeners{};
-
-struct BuffHudRow final {
-    char name[48]{};
-    std::uint32_t stateId{};
-    char displayType[16]{};
-    std::uint32_t valueStat{};
-    std::uint32_t maxStat{};
-    std::uint32_t skillId{};
-    std::uint8_t valueShift{};
-    std::uint8_t enabled{};
-};
 
 struct BuffDefinition final {
     std::uint32_t stateId{};
@@ -77,7 +67,10 @@ struct WhitelistCache final {
     std::vector<BuffDefinition> definitions;
 };
 
-std::atomic<std::shared_ptr<const WhitelistCache>> Whitelist{};
+std::mutex WhitelistUpdateMutex;
+std::array<WhitelistCache, 4> WhitelistSlots{};
+std::uint64_t WhitelistGeneration{};
+std::atomic<const WhitelistCache*> Whitelist{nullptr};
 
 struct TimerPresenceRecord final {
     std::uint64_t key{};
@@ -97,59 +90,6 @@ std::atomic<bool> FramePumpScheduled{};
 
 std::atomic<std::uint32_t> LastPumpedGameFrame{}; // once per 25 Hz game frame
 std::atomic<std::uint32_t> LastTimerDiscoveryFrame{}; // once per game frame
-
-constexpr std::array<D2RL::CustomTables::ColumnDefinition, 8> BuffHudColumns{{
-    {
-        .structSize = D2RL::CustomTables::ColumnDefinitionSize,
-        .name = "name",
-        .type = D2RL::CustomTables::ColumnType::Ascii,
-        .offset = static_cast<std::uint32_t>(offsetof(BuffHudRow, name)),
-        .length = sizeof(BuffHudRow::name),
-    },
-    {
-        .structSize = D2RL::CustomTables::ColumnDefinitionSize,
-        .name = "state_id",
-        .type = D2RL::CustomTables::ColumnType::Dword,
-        .offset = static_cast<std::uint32_t>(offsetof(BuffHudRow, stateId)),
-    },
-    {
-        .structSize = D2RL::CustomTables::ColumnDefinitionSize,
-        .name = "display_type",
-        .type = D2RL::CustomTables::ColumnType::Ascii,
-        .offset = static_cast<std::uint32_t>(offsetof(BuffHudRow, displayType)),
-        .length = sizeof(BuffHudRow::displayType),
-    },
-    {
-        .structSize = D2RL::CustomTables::ColumnDefinitionSize,
-        .name = "value_stat",
-        .type = D2RL::CustomTables::ColumnType::Dword,
-        .offset = static_cast<std::uint32_t>(offsetof(BuffHudRow, valueStat)),
-    },
-    {
-        .structSize = D2RL::CustomTables::ColumnDefinitionSize,
-        .name = "max_stat",
-        .type = D2RL::CustomTables::ColumnType::Dword,
-        .offset = static_cast<std::uint32_t>(offsetof(BuffHudRow, maxStat)),
-    },
-    {
-        .structSize = D2RL::CustomTables::ColumnDefinitionSize,
-        .name = "skill_id",
-        .type = D2RL::CustomTables::ColumnType::Dword,
-        .offset = static_cast<std::uint32_t>(offsetof(BuffHudRow, skillId)),
-    },
-    {
-        .structSize = D2RL::CustomTables::ColumnDefinitionSize,
-        .name = "value_shift",
-        .type = D2RL::CustomTables::ColumnType::Byte,
-        .offset = static_cast<std::uint32_t>(offsetof(BuffHudRow, valueShift)),
-    },
-    {
-        .structSize = D2RL::CustomTables::ColumnDefinitionSize,
-        .name = "enabled",
-        .type = D2RL::CustomTables::ColumnType::Byte,
-        .offset = static_cast<std::uint32_t>(offsetof(BuffHudRow, enabled)),
-    },
-}};
 
 [[nodiscard]] bool IsReadableRange(const void* address, std::size_t size) noexcept {
     if (address == nullptr || size == 0) return false;
@@ -189,7 +129,7 @@ template <typename T>
 }
 
 [[nodiscard]] const BuffDefinition* FindBuffDefinition(
-    const std::shared_ptr<const WhitelistCache>& cache,
+    const WhitelistCache* cache,
     std::uint32_t state) noexcept {
     if (cache == nullptr) return nullptr;
     const auto it = std::lower_bound(
@@ -202,92 +142,78 @@ template <typename T>
     return it != cache->definitions.end() && it->stateId == state ? &*it : nullptr;
 }
 
-[[nodiscard]] bool CopyWhitelistRows(
-    std::uint64_t& revision,
-    std::uint32_t& rowCount,
-    std::vector<std::uint8_t>& bytes) noexcept {
-    if (Context == nullptr || CustomTables == nullptr
-        || BuffHudTable == D2RL::CustomTables::InvalidHandle) {
-        return false;
+[[nodiscard]] const char* CatalogSourceLabel(LooseBuffHud::CatalogSource source) noexcept {
+    switch (source) {
+    case LooseBuffHud::CatalogSource::LooseOverride:
+        return "loose-override";
+    case LooseBuffHud::CatalogSource::ExcelFiles:
+        return "excel-files";
+    case LooseBuffHud::CatalogSource::BuiltinFallback:
+        return "builtin-fallback";
+    default:
+        return "none";
     }
-    D2RL::CustomTables::TableInfo info{};
-    info.structSize = D2RL::CustomTables::TableInfoSize;
-    if (CustomTables->getTableInfo(
-            Context, BuffHudTable, D2RL::CustomTables::TableBank::Rotw, &info)
-            != D2RL::CustomTables::Result::Success
-        || info.state != D2RL::CustomTables::TableState::Ready
-        || info.rowSize != sizeof(BuffHudRow)
-        || info.byteCount != static_cast<std::uint64_t>(info.rowCount) * sizeof(BuffHudRow)) {
-        return false;
-    }
-    bytes.resize(static_cast<std::size_t>(info.byteCount));
-    if (CustomTables->copyRows(
-            Context, BuffHudTable, D2RL::CustomTables::TableBank::Rotw,
-            info.revision, bytes.empty() ? nullptr : bytes.data(), info.byteCount)
-        != D2RL::CustomTables::Result::Success) {
-        return false;
-    }
-    revision = info.revision;
-    rowCount = info.rowCount;
-    return true;
 }
 
-[[nodiscard]] std::shared_ptr<const WhitelistCache> BuildWhitelist() noexcept {
-    std::uint64_t revision{};
-    std::uint32_t rowCount{};
-    std::vector<std::uint8_t> bytes;
-    if (!CopyWhitelistRows(revision, rowCount, bytes)) return {};
-
-    auto cache = std::make_shared<WhitelistCache>();
-    cache->revision = revision;
-    cache->definitions.reserve(rowCount);
-    for (std::uint32_t index = 0; index < rowCount; ++index) {
-        BuffHudRow row{};
-        std::memcpy(&row, bytes.data() + static_cast<std::size_t>(index) * sizeof(row), sizeof(row));
-        if (row.enabled == 0) continue;
-        if (row.name[0] == '\0' || row.stateId == 0 || row.stateId > 4095 || row.displayType[0] == '\0') {
-            return {};
-        }
-
-        BuffDefinition definition{};
-        definition.stateId = row.stateId;
-        const std::string_view displayType{row.displayType, strnlen(row.displayType, sizeof(row.displayType))};
-        if (displayType == "timer") {
-            if (row.valueStat != 0 || row.maxStat != 0 || row.skillId > 4095 || row.valueShift != 0) return {};
-            definition.displayMode = Core::BuffDisplayMode::Timer;
-            definition.sourceSkillId = static_cast<std::int32_t>(row.skillId);
-        } else if (displayType == "resource") {
-            if (row.valueStat == 0 || row.maxStat == 0 || row.skillId == 0
-                || row.valueStat > 4095 || row.maxStat > 4095 || row.skillId > 4095
-                || row.valueShift > 30) {
-                return {};
-            }
-            definition.displayMode = Core::BuffDisplayMode::Resource;
-            definition.valueStatId = static_cast<std::int32_t>(row.valueStat);
-            definition.maxStatId = static_cast<std::int32_t>(row.maxStat);
-            definition.sourceSkillId = static_cast<std::int32_t>(row.skillId);
-            definition.valueShift = row.valueShift;
-        } else {
-            return {};
-        }
-        cache->definitions.push_back(definition);
+[[nodiscard]] bool RefreshWhitelist(std::uint64_t revision) noexcept {
+    if (Context == nullptr) return false;
+    const auto resolution = LooseBuffHud::ResolveCatalog(
+        Context->modSupportDirectory != nullptr ? Context->modSupportDirectory : L"",
+        Context->modDirectory != nullptr ? Context->modDirectory : L"",
+        Context->activeMod != nullptr ? Context->activeMod : "");
+    if (resolution.source == LooseBuffHud::CatalogSource::InvalidOverride
+        || resolution.entries.empty()) {
+        Whitelist.store(nullptr, std::memory_order_release);
+        char line[512]{};
+        std::snprintf(
+            line,
+            sizeof(line),
+            "Buff HUD: catalog resolution failed (%s); whitelist-driven BuffHud publishing is disabled.",
+            resolution.error.c_str());
+        Context->LogError(line);
+        return false;
     }
 
-    std::sort(
-        cache->definitions.begin(),
-        cache->definitions.end(),
-        [](const BuffDefinition& lhs, const BuffDefinition& rhs) noexcept {
-            return lhs.stateId < rhs.stateId;
-        });
-    if (std::adjacent_find(
-            cache->definitions.begin(),
-            cache->definitions.end(),
-            [](const BuffDefinition& lhs, const BuffDefinition& rhs) noexcept {
-                return lhs.stateId == rhs.stateId;
-            }) != cache->definitions.end()) {
-        return {};
+    std::size_t count{};
+    std::uint64_t publishedRevision{};
+    {
+        std::lock_guard lock(WhitelistUpdateMutex);
+        ++WhitelistGeneration;
+        auto& slot = WhitelistSlots[WhitelistGeneration % WhitelistSlots.size()];
+        slot.revision = revision != 0 ? revision : WhitelistGeneration;
+        slot.definitions.clear();
+        slot.definitions.reserve(resolution.entries.size());
+        for (const auto& entry : resolution.entries) {
+            slot.definitions.push_back(BuffDefinition{
+                .stateId = entry.stateId,
+                .displayMode = entry.isResource
+                    ? Core::BuffDisplayMode::Resource
+                    : Core::BuffDisplayMode::Timer,
+                .valueStatId = entry.valueStatId,
+                .maxStatId = entry.maxStatId,
+                .sourceSkillId = entry.sourceSkillId,
+                .valueShift = entry.valueShift,
+            });
+        }
+        count = slot.definitions.size();
+        publishedRevision = slot.revision;
+        Whitelist.store(&slot, std::memory_order_release);
     }
-    return cache;
+
+    const auto sourcePath = resolution.path.empty()
+        ? std::string{"<builtin>"}
+        : resolution.path.string();
+    char line[512]{};
+    std::snprintf(
+        line,
+        sizeof(line),
+        "Buff HUD: catalog ready; source=%s path=%s enabledDefinitions=%zu revision=%llu.",
+        CatalogSourceLabel(resolution.source),
+        sourcePath.c_str(),
+        count,
+        static_cast<unsigned long long>(publishedRevision));
+    Context->LogInfo(line);
+    return true;
 }
 
 void __cdecl OnTablesLoaded(
@@ -299,20 +225,7 @@ void __cdecl OnTablesLoaded(
             event, D2RL::Lifecycle::DataTablesLoadedEventRequiredSize)) {
         return;
     }
-    const auto cache = BuildWhitelist();
-    if (!cache) {
-        Whitelist.store({}, std::memory_order_release);
-        context->LogError("Buff HUD: buff-hud.txt rejected; whitelist-driven BuffHud publishing is disabled.");
-        return;
-    }
-    const auto count = cache->definitions.size();
-    const auto revision = cache->revision;
-    Whitelist.store(cache, std::memory_order_release);
-    char line[256]{};
-    std::snprintf(line, sizeof(line),
-        "Buff HUD: buff-hud.txt ready; enabledDefinitions=%zu revision=%llu.",
-        count, static_cast<unsigned long long>(revision));
-    context->LogInfo(line);
+    (void)RefreshWhitelist(event->revision);
 }
 
 [[nodiscard]] std::uint64_t AutomaticBuffKey(std::uint32_t state, std::uint32_t skill) noexcept {
@@ -507,7 +420,7 @@ void RefreshTimerPresence(std::uint32_t currentFrame) noexcept {
 void RefreshResourceBuffs() noexcept {
     auto* player = AuthoritativePlayer.load(std::memory_order_acquire);
     const auto getter = Core::StatReads().RawGetter();
-    const auto cache = Whitelist.load(std::memory_order_acquire);
+    const auto* cache = Whitelist.load(std::memory_order_acquire);
     if (player == nullptr || getter == nullptr || cache == nullptr) return;
 
     // D2RLoader 1.3 materializes the shared stash as a UNIT_PLAYER-shaped
@@ -604,7 +517,7 @@ void DiscoverAttachedTimers(std::uint32_t currentFrame) noexcept {
     if (currentFrame == 0 || LastTimerDiscoveryFrame.load(std::memory_order_relaxed) == currentFrame) return;
     LastTimerDiscoveryFrame.store(currentFrame, std::memory_order_relaxed);
     auto* player = AuthoritativePlayer.load(std::memory_order_acquire);
-    const auto cache = Whitelist.load(std::memory_order_acquire);
+    const auto* cache = Whitelist.load(std::memory_order_acquire);
     if (player == nullptr || GetStatListFromUnitAndState == nullptr || cache == nullptr) return;
     // The loader's UNIT_PLAYER-shaped shared stash proxy must never be treated
     // as a gameplay player. This matches RefreshResourceBuffs' safety guard.
@@ -760,7 +673,7 @@ void OnStatListPost(
     if (phase == Core::StatListPostPhase::BeforeNative) {
     }
 
-    const auto cache = Whitelist.load(std::memory_order_acquire);
+    const auto* cache = Whitelist.load(std::memory_order_acquire);
     const auto* definition = FindBuffDefinition(cache, state);
     if (definition == nullptr) {
         if (phase == Core::StatListPostPhase::BeforeNative) {
@@ -848,30 +761,6 @@ void __cdecl OnGameplayEvent(
     }
 }
 
-[[nodiscard]] bool RegisterTable() noexcept {
-    if (Context == nullptr || CustomTables == nullptr) return false;
-    // The default TXT lives in d2rl-buff-panel.mpq. D2RLoader owns resource
-    // selection and custom-table compilation; no mod-side file is required.
-    const D2RL::CustomTables::TableRegistration registration{
-        .structSize = D2RL::CustomTables::TableRegistrationSize,
-        .name = "buff-hud",
-        .banks = D2RL::CustomTables::TableBank::Rotw,
-        .rowSize = sizeof(BuffHudRow),
-        .columns = BuffHudColumns.data(),
-        .columnCount = static_cast<std::uint32_t>(BuffHudColumns.size()),
-        .columnStride = D2RL::CustomTables::ColumnDefinitionSize,
-    };
-    if (CustomTables->registerTable(Context, &registration, &BuffHudTable)
-            != D2RL::CustomTables::Result::Success
-        || BuffHudTable == D2RL::CustomTables::InvalidHandle) {
-        Context->LogError("Buff HUD: unable to register selected buff-hud.txt custom table.");
-        return false;
-    }
-    Context->LogInfo(
-        "Buff HUD: registered buff-hud custom table from companion resources; active-mod overrides take priority.");
-    return true;
-}
-
 [[nodiscard]] bool RegisterLifecycle() noexcept {
     if (Context == nullptr || Lifecycle == nullptr) return false;
     const D2RL::Lifecycle::DataTablesLoadedListener tableListener{
@@ -914,13 +803,12 @@ bool Initialize(const D2RL::PluginContext* context) noexcept {
     if (context == nullptr || context->exeBase == 0) return false;
     Context = context;
     const auto& services = Core::Services();
-    CustomTables = services.customTables;
     Threads = services.threads;
     Lifecycle = services.lifecycle;
-    if (CustomTables == nullptr || Threads == nullptr || Lifecycle == nullptr
+    if (Threads == nullptr || Lifecycle == nullptr
         || !D2RL::HasThreadServiceField(Threads, D2RL::ThreadServiceRequiredSize)
         || !D2RL::HasLifecycleServiceField(Lifecycle, D2RL::LifecycleServiceRequiredSize)) {
-        Context->LogError("Buff HUD: required CustomTable/Thread/Lifecycle service unavailable.");
+        Context->LogError("Buff HUD: required Thread/Lifecycle service unavailable.");
         Shutdown();
         return false;
     }
@@ -968,13 +856,13 @@ bool Initialize(const D2RL::PluginContext* context) noexcept {
         return false;
     }
 
-    if (!RegisterTable() || !RegisterLifecycle()) {
-        Context->LogError("Buff HUD: failed to register buff-hud table/lifecycle listeners.");
+    if (!RegisterLifecycle() || !RefreshWhitelist(0)) {
+        Context->LogError("Buff HUD: failed to initialize runtime buff catalog or lifecycle listeners.");
         Shutdown();
         return false;
     }
     Context->LogInfo(
-        "Buff HUD 1.1.0 BuffTracker initialized: companion whitelist tracking with native skill attribution, configured skill fallback, exact-state lifetime checks, and finite native expiry validation.");
+        "Buff HUD 1.1.2 BuffTracker initialized: runtime Excel buff catalog tracking with native skill attribution, configured skill fallback, exact-state lifetime checks, and finite native expiry validation.");
     return true;
 }
 
@@ -985,14 +873,12 @@ void Shutdown() noexcept {
     FramePumpScheduled.store(false, std::memory_order_release);
     LastPumpedGameFrame.store(0, std::memory_order_relaxed);
     LastTimerDiscoveryFrame.store(0, std::memory_order_relaxed);
-    Whitelist.store({}, std::memory_order_release);
-    BuffHudTable = D2RL::CustomTables::InvalidHandle;
+    Whitelist.store(nullptr, std::memory_order_release);
     DataTablesListener = D2RL::Lifecycle::InvalidHandle;
     GameplayListeners = {};
     ClearTimerPresenceRecords();
     GetGameFromUnit = nullptr;
     GetStatListFromUnitAndState = nullptr;
-    CustomTables = nullptr;
     Threads = nullptr;
     Lifecycle = nullptr;
     Context = nullptr;

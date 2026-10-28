@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.29)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(BuffPanel VERSION 1.1.0 LANGUAGES CXX RC)
+    project(BuffPanel VERSION 1.1.2 LANGUAGES CXX RC)
 elseif(WIN32)
     enable_language(RC)
 endif()
@@ -41,6 +41,7 @@ add_library(buff_panel SHARED
     src/core/stat_read_bus.cpp
     src/core/buff_display_bus.cpp
     src/systems/buff_tracker/buff_tracker.cpp
+    src/systems/buff_tracker/loose_buff_hud.cpp
     src/systems/buff_hud/buff_hud.cpp
     src/systems/buff_hud/icon_frame_backend.cpp
     src/systems/buff_hud/skill_icon_resolver.cpp
@@ -70,11 +71,9 @@ target_compile_options(buff_panel_validate PRIVATE /utf-8 /EHsc)
 set(BUFF_PANEL_SDK_LICENSE_FILE "${BUFF_PANEL_SDK_DIR}/LICENSE" CACHE FILEPATH "PluginSDK license to include in dist")
 set(D2RL_COMPILER "${CMAKE_CURRENT_SOURCE_DIR}/external/D2RLCompiler/D2RLCompiler.exe" CACHE FILEPATH "Repository-pinned D2RLCompiler.exe used to pack the companion MPQ")
 set(BUFF_PANEL_LAYOUT "${CMAKE_CURRENT_SOURCE_DIR}/companion/data/global/ui/layouts/buff-panel/BuffHudhd.json")
-set(BUFF_PANEL_TABLE "${CMAKE_CURRENT_SOURCE_DIR}/companion/data/global/excel/d2rloader/buff-panel/buff-hud.txt")
 # Run on every build so an asset-only edit (or deletion) cannot leave a stale MPQ.
-# Custom-table TXT is compiled by D2RLoader after registerTable; pack needs no game link.
 add_custom_target(buff_panel_companion
-    COMMAND buff_panel_validate "${BUFF_PANEL_LAYOUT}" "${BUFF_PANEL_TABLE}"
+    COMMAND buff_panel_validate "${BUFF_PANEL_LAYOUT}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:buff_panel>"
     COMMAND "${CMAKE_COMMAND}"
         "-DD2RL_COMPILER=${D2RL_COMPILER}"
@@ -143,5 +142,5 @@ if(BUFF_PANEL_BUILD_TESTS)
         target_compile_features(loose_${kind}_test PRIVATE cxx_std_20)
         target_compile_options(loose_${kind}_test PRIVATE /utf-8 /EHsc)
     endforeach()
-    add_test(NAME companion_assets COMMAND buff_panel_validate "${BUFF_PANEL_LAYOUT}" "${BUFF_PANEL_TABLE}")
+    add_test(NAME companion_assets COMMAND buff_panel_validate "${BUFF_PANEL_LAYOUT}")
 endif()

@@ -1,6 +1,10 @@
 # Buff HUD changelog
 
-## Unreleased
+## 1.1.2 - 2026-10-28
+- Cut per-frame CPU overhead by ~97% (0.2186 ms -> 0.0060 ms/frame) by gating state scans to the 25 Hz game clock, replacing per-read VirtualQuery syscalls with table-based SEH reads, and caching slot visibility/enabled states.
+- Derive the runtime buff catalog automatically from the active mod's states.txt, skills.txt, and itemstatcost.txt (with optional loose buff-hud.txt override support), removing the compiled custom table from the companion MPQ.
+
+## 1.1.1 - 2026-10-20
 - Keep buff icons and countdowns consistent when switching between controller and keyboard/mouse; hide empty slots after native UI resets.
 
 ## 1.0.11 — companion-MPQ reconciliation and production cleanup (2026-09-29)

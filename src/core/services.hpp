@@ -7,7 +7,6 @@ namespace BuffPanel::Core {
 struct ServiceRegistry final {
     const D2RL::PluginContext* context{};
     const D2RL::PanelService* panels{};
-    const D2RL::CustomTableService* customTables{};
     const D2RL::LifecycleService* lifecycle{};
     const D2RL::ThreadService* threads{};
     const D2RL::WidgetService* widgets{};

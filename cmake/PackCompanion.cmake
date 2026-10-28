@@ -17,7 +17,6 @@ file(MAKE_DIRECTORY "${output_dir}")
 execute_process(
     COMMAND "${D2RL_COMPILER}" pack "${BUFF_PANEL_COMPANION_DIR}"
         --output "${BUFF_PANEL_COMPANION_OUTPUT}"
-        --include-excel-txt
     RESULT_VARIABLE pack_result
     OUTPUT_VARIABLE pack_stdout
     ERROR_VARIABLE pack_stderr
