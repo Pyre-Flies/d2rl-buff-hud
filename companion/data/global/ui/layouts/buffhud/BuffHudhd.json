@@ -1,6 +1,6 @@
 {
   "type": "Panel",
-  "name": "buff-panel/BuffHud",
+  "name": "buffhud/BuffHud",
   "fields": {
     "anchor": {
       "x": 0.5,
@@ -15,7 +15,7 @@
       "fields": {
         "rect": {
           "x": -150,
-          "y": -515,
+          "y": -665,
           "width": 780,
           "height": 300
         }
@@ -206,17 +206,19 @@
               }
             },
             {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
+              "type": "ButtonWidget",
+              "name": "AuraCheck",
               "fields": {
+                "visible": false,
                 "rect": {
-                  "x": 0,
+                  "x": 60,
                   "y": 0,
-                  "width": 96,
-                  "height": 96
+                  "scale": 0.5
                 },
-                "tooltipString": "​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
+                "filename": "Lobby\\CreateGame\\CreateGame_AdvancedCheckbox",
+                "normalFrame": 4,
+                "pressedFrame": 5,
+                "focusOnMouseOver": false
               }
             }
           ]
@@ -404,20 +406,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -603,20 +591,6 @@
                     "hideOverflow": true
                   }
                 }
-              }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
               }
             }
           ]
@@ -804,20 +778,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -1003,20 +963,6 @@
                     "hideOverflow": true
                   }
                 }
-              }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "​​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
               }
             }
           ]
@@ -1204,20 +1150,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -1403,20 +1335,6 @@
                     "hideOverflow": true
                   }
                 }
-              }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "​‌‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
               }
             }
           ]
@@ -1604,20 +1522,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌‌‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -1803,20 +1707,6 @@
                     "hideOverflow": true
                   }
                 }
-              }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "​​​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
               }
             }
           ]
@@ -2004,20 +1894,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌​​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -2203,20 +2079,6 @@
                     "hideOverflow": true
                   }
                 }
-              }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "​‌​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
               }
             }
           ]
@@ -2404,20 +2266,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌‌​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -2603,20 +2451,6 @@
                     "hideOverflow": true
                   }
                 }
-              }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "​​‌‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
               }
             }
           ]
@@ -2804,20 +2638,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌​‌‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -3003,20 +2823,6 @@
                     "hideOverflow": true
                   }
                 }
-              }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "​‌‌‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
               }
             }
           ]
@@ -3204,20 +3010,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌‌‌‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -3403,20 +3195,6 @@
                     "hideOverflow": true
                   }
                 }
-              }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "​​​​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
               }
             }
           ]
@@ -3604,20 +3382,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌​​​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -3803,20 +3567,6 @@
                     "hideOverflow": true
                   }
                 }
-              }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "​‌​​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
               }
             }
           ]
@@ -4004,20 +3754,6 @@
                   }
                 }
               }
-            },
-            {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
-              "fields": {
-                "rect": {
-                  "x": 0,
-                  "y": 0,
-                  "width": 96,
-                  "height": 96
-                },
-                "tooltipString": "‌‌​​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
-              }
             }
           ]
         },
@@ -4204,19 +3940,392 @@
                   }
                 }
               }
+            }
+          ]
+        },
+        {
+          "type": "NineTileImageWidget",
+          "name": "HoverBox0S",
+          "fields": {
+            "visible": false,
+            "rect": {
+              "x": 0,
+              "y": -68,
+              "width": 360,
+              "height": 60
             },
+            "filename": "PANEL/TooltipBorder/TooltipBorder",
+            "backgroundColor": [0.0, 0.0, 0.0, 0.8],
+            "tileScale": 1.0
+          },
+          "children": [
             {
-              "type": "FocusableWidget",
-              "name": "Tooltip",
+              "type": "TextBoxWidget",
+              "name": "Text",
               "fields": {
+                "text": "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________",
+                "fontType": "16pt",
                 "rect": {
                   "x": 0,
                   "y": 0,
-                  "width": 96,
-                  "height": 96
+                  "width": 360,
+                  "height": 60
                 },
-                "tooltipString": "​​‌​‌​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​",
-                "tooltipStyle": "$TooltipStyle"
+                "style": {
+                  "pointSize": "$MediumFontSize",
+                  "fontColor": "$FontColorGoldYellow",
+                  "alignment": {
+                    "h": "center",
+                    "v": "center"
+                  },
+                  "options": {
+                    "hideOverflow": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "NineTileImageWidget",
+          "name": "HoverBox0M",
+          "fields": {
+            "visible": false,
+            "rect": {
+              "x": 0,
+              "y": -68,
+              "width": 600,
+              "height": 60
+            },
+            "filename": "PANEL/TooltipBorder/TooltipBorder",
+            "backgroundColor": [0.0, 0.0, 0.0, 0.8],
+            "tileScale": 1.0
+          },
+          "children": [
+            {
+              "type": "TextBoxWidget",
+              "name": "Text",
+              "fields": {
+                "text": "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________",
+                "fontType": "16pt",
+                "rect": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 600,
+                  "height": 60
+                },
+                "style": {
+                  "pointSize": "$MediumFontSize",
+                  "fontColor": "$FontColorGoldYellow",
+                  "alignment": {
+                    "h": "center",
+                    "v": "center"
+                  },
+                  "options": {
+                    "hideOverflow": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "NineTileImageWidget",
+          "name": "HoverBox0L",
+          "fields": {
+            "visible": false,
+            "rect": {
+              "x": 0,
+              "y": -68,
+              "width": 920,
+              "height": 60
+            },
+            "filename": "PANEL/TooltipBorder/TooltipBorder",
+            "backgroundColor": [0.0, 0.0, 0.0, 0.8],
+            "tileScale": 1.0
+          },
+          "children": [
+            {
+              "type": "TextBoxWidget",
+              "name": "Text",
+              "fields": {
+                "text": "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________",
+                "fontType": "16pt",
+                "rect": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 920,
+                  "height": 60
+                },
+                "style": {
+                  "pointSize": "$MediumFontSize",
+                  "fontColor": "$FontColorGoldYellow",
+                  "alignment": {
+                    "h": "center",
+                    "v": "center"
+                  },
+                  "options": {
+                    "hideOverflow": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "NineTileImageWidget",
+          "name": "HoverBox1S",
+          "fields": {
+            "visible": false,
+            "rect": {
+              "x": 0,
+              "y": 37,
+              "width": 360,
+              "height": 60
+            },
+            "filename": "PANEL/TooltipBorder/TooltipBorder",
+            "backgroundColor": [0.0, 0.0, 0.0, 0.8],
+            "tileScale": 1.0
+          },
+          "children": [
+            {
+              "type": "TextBoxWidget",
+              "name": "Text",
+              "fields": {
+                "text": "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________",
+                "fontType": "16pt",
+                "rect": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 360,
+                  "height": 60
+                },
+                "style": {
+                  "pointSize": "$MediumFontSize",
+                  "fontColor": "$FontColorGoldYellow",
+                  "alignment": {
+                    "h": "center",
+                    "v": "center"
+                  },
+                  "options": {
+                    "hideOverflow": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "NineTileImageWidget",
+          "name": "HoverBox1M",
+          "fields": {
+            "visible": false,
+            "rect": {
+              "x": 0,
+              "y": 37,
+              "width": 600,
+              "height": 60
+            },
+            "filename": "PANEL/TooltipBorder/TooltipBorder",
+            "backgroundColor": [0.0, 0.0, 0.0, 0.8],
+            "tileScale": 1.0
+          },
+          "children": [
+            {
+              "type": "TextBoxWidget",
+              "name": "Text",
+              "fields": {
+                "text": "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________",
+                "fontType": "16pt",
+                "rect": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 600,
+                  "height": 60
+                },
+                "style": {
+                  "pointSize": "$MediumFontSize",
+                  "fontColor": "$FontColorGoldYellow",
+                  "alignment": {
+                    "h": "center",
+                    "v": "center"
+                  },
+                  "options": {
+                    "hideOverflow": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "NineTileImageWidget",
+          "name": "HoverBox1L",
+          "fields": {
+            "visible": false,
+            "rect": {
+              "x": 0,
+              "y": 37,
+              "width": 920,
+              "height": 60
+            },
+            "filename": "PANEL/TooltipBorder/TooltipBorder",
+            "backgroundColor": [0.0, 0.0, 0.0, 0.8],
+            "tileScale": 1.0
+          },
+          "children": [
+            {
+              "type": "TextBoxWidget",
+              "name": "Text",
+              "fields": {
+                "text": "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________",
+                "fontType": "16pt",
+                "rect": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 920,
+                  "height": 60
+                },
+                "style": {
+                  "pointSize": "$MediumFontSize",
+                  "fontColor": "$FontColorGoldYellow",
+                  "alignment": {
+                    "h": "center",
+                    "v": "center"
+                  },
+                  "options": {
+                    "hideOverflow": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "NineTileImageWidget",
+          "name": "HoverBox2S",
+          "fields": {
+            "visible": false,
+            "rect": {
+              "x": 0,
+              "y": 142,
+              "width": 360,
+              "height": 60
+            },
+            "filename": "PANEL/TooltipBorder/TooltipBorder",
+            "backgroundColor": [0.0, 0.0, 0.0, 0.8],
+            "tileScale": 1.0
+          },
+          "children": [
+            {
+              "type": "TextBoxWidget",
+              "name": "Text",
+              "fields": {
+                "text": "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________",
+                "fontType": "16pt",
+                "rect": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 360,
+                  "height": 60
+                },
+                "style": {
+                  "pointSize": "$MediumFontSize",
+                  "fontColor": "$FontColorGoldYellow",
+                  "alignment": {
+                    "h": "center",
+                    "v": "center"
+                  },
+                  "options": {
+                    "hideOverflow": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "NineTileImageWidget",
+          "name": "HoverBox2M",
+          "fields": {
+            "visible": false,
+            "rect": {
+              "x": 0,
+              "y": 142,
+              "width": 600,
+              "height": 60
+            },
+            "filename": "PANEL/TooltipBorder/TooltipBorder",
+            "backgroundColor": [0.0, 0.0, 0.0, 0.8],
+            "tileScale": 1.0
+          },
+          "children": [
+            {
+              "type": "TextBoxWidget",
+              "name": "Text",
+              "fields": {
+                "text": "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________",
+                "fontType": "16pt",
+                "rect": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 600,
+                  "height": 60
+                },
+                "style": {
+                  "pointSize": "$MediumFontSize",
+                  "fontColor": "$FontColorGoldYellow",
+                  "alignment": {
+                    "h": "center",
+                    "v": "center"
+                  },
+                  "options": {
+                    "hideOverflow": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "NineTileImageWidget",
+          "name": "HoverBox2L",
+          "fields": {
+            "visible": false,
+            "rect": {
+              "x": 0,
+              "y": 142,
+              "width": 920,
+              "height": 60
+            },
+            "filename": "PANEL/TooltipBorder/TooltipBorder",
+            "backgroundColor": [0.0, 0.0, 0.0, 0.8],
+            "tileScale": 1.0
+          },
+          "children": [
+            {
+              "type": "TextBoxWidget",
+              "name": "Text",
+              "fields": {
+                "text": "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________",
+                "fontType": "16pt",
+                "rect": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 920,
+                  "height": 60
+                },
+                "style": {
+                  "pointSize": "$MediumFontSize",
+                  "fontColor": "$FontColorGoldYellow",
+                  "alignment": {
+                    "h": "center",
+                    "v": "center"
+                  },
+                  "options": {
+                    "hideOverflow": true
+                  }
+                }
               }
             }
           ]

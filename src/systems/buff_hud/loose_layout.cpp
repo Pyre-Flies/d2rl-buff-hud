@@ -229,7 +229,7 @@ private:
                 if (key == "type" && name == "Panel") rootPanel_ = true;
                 if (key == "name") {
                     objectName = name;
-                    if (name == "buff-panel/BuffHud") rootName_ = true;
+                    if (name == "buffhud/BuffHud") rootName_ = true;
                     if (name == "BuffGrid") buffGrid_ = true;
                     for (std::size_t i = 0; i < slots_.size(); ++i) {
                         if (name.size() == 10 && name.substr(0, 8) == "BuffSlot"

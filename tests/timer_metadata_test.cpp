@@ -30,6 +30,12 @@ int main() {
     assert(ResolveTimer(custom, 350, 0, 10743, skill, expiry) && skill == 511);
     custom.flags |= 0x20;
     assert(!ResolveTimer(custom, 350, 510, 10743, skill, expiry));
+    custom.flags = 0; // non-temporary StatList (never expires in D2R) must be rejected
+    assert(!ResolveTimer(custom, 350, 510, 10743, skill, expiry));
+    for (std::uint32_t badFlag : {StatListSuppressedFlag, StatListDisabledFlag, StatListExtendedFlag}) {
+        custom.flags = StatListTempFlag | badFlag;
+        assert(!ResolveTimer(custom, 350, 510, 10743, skill, expiry));
+    }
     custom.flags = 2;
     for (float invalid : {0.0f, 10743.0f, 10742.0f, 16000.5f, 4294967296.0f,
             std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN(),

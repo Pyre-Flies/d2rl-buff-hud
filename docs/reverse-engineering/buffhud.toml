@@ -1,0 +1,765 @@
+component   = "buffhud"
+paths       = ["plugins/buffhud"]
+shipped_as  = "d2rl-buffhud.dll"
+role        = "shared"
+tracked     = true
+summary     = """
+21-slot (3x7) temporary-buff HUD and countdown/resource tracker. Derives its
+buff catalog at runtime from the active mod's Excel files (`states.txt`,
+`skills.txt`, `itemstatcost.txt`, with optional loose `buff-hud.txt` override)
+and spawns `BuffHud` (`BuffHudhd.json`) via PanelService.
+Resolves D2RLoader's RIP-indirect bridges for `STATLIST_GetUnitStat` (0x2F5020)
+and `STATLIST_PostStatList` (0x2F2CB0) with ±0x10000 slot-drift tolerance, hooks
+`STATLIST_PostStatList` via InstallInlineHook, and validates exact byte witnesses
+for `UNITS_GetGame` (0x48FF00), `STATLIST_GetStatListFromUnitAndState` (0x2F5940
+via callsite 0x433FFC), `FindTopLevelPanel` (0x846170), `FindChildWidgetByName`
+(0x856220), and `ButtonWidget` live icon-frame setters (0x859700 / 0x870460).
+"""
+tests       = ["scripts/run-buffhud-tests.ps1"]
+regen       = []
+failure_logs = [
+  "Buff HUD: cannot resolve D2RLoader's qualified GetUnitStat bridge; refusing to load.",
+  "Buff HUD: native panel hierarchy helpers failed build-93847 signature check; refusing native tooltip binding.",
+  "Buff HUD: icon-frame backend failed build-93847 descriptor/callsite qualification; refusing to load.",
+  "Buff HUD: UNITS_GetGame native fingerprint mismatch; refusing whitelist-driven buff tracking.",
+  "Buff HUD: exact-state StatList lookup native fingerprint mismatch; refusing premature timer-removal tracking.",
+  "Buff HUD: failed to register with the shared Core STATLIST_PostStatList bus.",
+  "Blood Golem aura opt-out witness",
+  "Blood Golem aura opt-out cannot resolve D2RLoader's SuppressStateStats bridge",
+  "the Blood Golem aura patch was refused",
+]
+services    = [
+  "PanelService",
+  "LifecycleService",
+  "ThreadService",
+  "WidgetService",
+  "DataTableService",
+  "LocalizationService",
+  "MutationService",
+  "NetworkService",
+  "PluginCommunicationService",
+]
+exports     = []
+native_hooks = true
+lint_ignore = [
+  0x10000,    # rip_indirect_bridge.hpp / buff_hud.cpp / buff_tracker.cpp: slot drift bound and user-mode pointer floor
+  0x00001000, # tests/timer_metadata_test.cpp: synthetic test flags
+  0x00002000, # tests/timer_metadata_test.cpp: synthetic test flags
+  0x400000,   # tests/tooltip_binding_test.cpp: synthetic test module base
+  0x2230,     # blood_aura_contract.hpp: Game player unit list offset (buffhud.blood-aura.player-list)
+  0xB100,     # buff_hud.cpp: first digit group of BloodAuraKey, a display-bus key
+]
+
+[[dep]]
+id          = "buffhud.stat.get-unit-stat-thunk"
+feature     = "Read live resource buff pools (e.g. Bone Armor current/max absorb)"
+layer       = "loader-exe"
+kind        = "import-thunk"
+module      = "game"
+rva         = 0x2F5020
+size        = 10
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:9", "plugins/buffhud/src/plugin.cpp:58"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+STATLIST_GetUnitStat entry stub (`FF 25 rel32 90 90 90 90`). Resolved via
+ResolveRipIndirectBridge, which verifies the `FF 25` opcode and 4 trailing NOPs,
+decodes the live `.maho` IAT slot within ±0x10000 of 0x3E2A1B0, and reads the
+executable D2RCore target pointer without installing a hook.
+"""
+rederive    = "Follow STATLIST_GetUnitStat callers or see recipes/loader-thunks.md."
+
+[[dep]]
+id          = "buffhud.stat.get-unit-stat-slot"
+feature     = "Read live resource buff pools (e.g. Bone Armor current/max absorb)"
+layer       = "loader-exe"
+kind        = "iat-slot"
+module      = "game"
+rva         = 0x3E2A1B0
+size        = 8
+guard       = "proven-by"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:10", "plugins/buffhud/src/plugin.cpp:60"]
+proven_by   = ["buffhud.stat.get-unit-stat-thunk"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Loader `.maho` bridge slot for STATLIST_GetUnitStat; drift up to ±0x10000 is resolved dynamically from the rel32 at 0x2F5020."
+rederive    = "Decode `FF 25 rel32` at 0x2F5020; recipe recipes/loader-thunks.md."
+
+[[dep]]
+id          = "buffhud.statlist.post-thunk-hook"
+feature     = "Observe timed and resource buff StatLists posted to the player unit"
+layer       = "loader-exe"
+kind        = "inline-hook"
+module      = "game"
+rva         = 0x2F2CB0
+size        = 10
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:123", "plugins/buffhud/src/systems/buff_tracker/buff_tracker.cpp:845"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+STATLIST_PostStatList entry stub (`FF 25 rel32 90 90 90 90`). Qualified via
+ResolveRipIndirectBridge and hooked with PluginContext::InstallInlineHook using
+the live 10-byte entry slice as expected bytes.
+"""
+rederive    = "Follow STATLIST_PostStatList callers or see recipes/loader-thunks.md."
+
+[[dep]]
+id          = "buffhud.statlist.post-slot"
+feature     = "Observe timed and resource buff StatLists posted to the player unit"
+layer       = "loader-exe"
+kind        = "iat-slot"
+module      = "game"
+rva         = 0x3E2A208
+size        = 8
+guard       = "proven-by"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:117", "plugins/buffhud/src/systems/buff_tracker/buff_tracker.cpp:847"]
+proven_by   = ["buffhud.statlist.post-thunk-hook"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Loader `.maho` bridge slot for STATLIST_PostStatList; drift up to ±0x10000 is resolved dynamically from the rel32 at 0x2F2CB0."
+rederive    = "Decode `FF 25 rel32` at 0x2F2CB0; recipe recipes/loader-thunks.md."
+
+[[dep]]
+id          = "buffhud.unit.get-game"
+feature     = "Read authoritative 25 Hz game frame from player unit's game instance"
+layer       = "engine"
+kind        = "call-target"
+module      = "game"
+rva         = 0x48FF00
+size        = 32
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:109", "plugins/buffhud/src/systems/buff_tracker/buff_tracker.cpp:817"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "UNITS_GetGame void*(unit): 32-byte prologue checked with CheckExpectedBytes before calling."
+rederive    = "Recipe: recipes/witnesses.md."
+
+[[dep]]
+id          = "buffhud.statlist.get-from-unit-and-state-callsite"
+feature     = "Detect buff expiry/removal and shared-stash proxy state 186"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x433FFC
+size        = 5
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:100", "plugins/buffhud/src/systems/buff_tracker/buff_tracker.cpp:828"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "5-byte `E8 3F 19 EC FF` call at 0x433FFC targeting STATLIST_GetStatListFromUnitAndState (0x2F5940)."
+rederive    = "Recipe: recipes/witnesses.md."
+
+[[dep]]
+id          = "buffhud.statlist.get-from-unit-and-state"
+feature     = "Detect buff expiry/removal and shared-stash proxy state 186"
+layer       = "engine"
+kind        = "call-target"
+module      = "game"
+rva         = 0x2F5940
+size        = 16
+guard       = "proven-by"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:111", "plugins/buffhud/src/systems/buff_tracker/buff_tracker.cpp:836"]
+proven_by   = ["buffhud.statlist.get-from-unit-and-state-callsite"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "STATLIST_GetStatListFromUnitAndState void*(unit, int32 state), proven by the witnessed callsite at 0x433FFC."
+rederive    = "Follow E8 call at 0x433FFC; recipe recipes/loader-thunks.md."
+
+[[dep]]
+id          = "buffhud.ui.find-top-level-panel"
+feature     = "Locate native BuffHud panel widget for tooltip and icon binding"
+layer       = "engine"
+kind        = "call-target"
+module      = "game"
+rva         = 0x846170
+size        = 22
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:92", "plugins/buffhud/src/systems/buff_hud/buff_hud.cpp:414"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "FindTopLevelPanel void*(panelManager, const char* name): 22-byte body checked with CheckExpectedBytes."
+rederive    = "Recipe: recipes/witnesses.md."
+
+[[dep]]
+id          = "buffhud.ui.find-child-widget"
+feature     = "Locate BuffGrid, BuffSlot00..20, Countdown, and Tooltip child widgets"
+layer       = "engine"
+kind        = "call-target"
+module      = "game"
+rva         = 0x856220
+size        = 32
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:84", "plugins/buffhud/src/systems/buff_hud/buff_hud.cpp:418"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Widget::FindChildByName void*(parentWidget, const char* name): 32-byte prologue checked with CheckExpectedBytes."
+rederive    = "Recipe: recipes/witnesses.md."
+
+[[dep]]
+id          = "buffhud.ui.button-normal-apply-witness"
+feature     = "Select skill icon cel frame on BuffHud ButtonWidget"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x870298
+size        = 26
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:35", "plugins/buffhud/src/systems/buff_hud/icon_frame_backend.cpp:153"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "26-byte block in ButtonWidget normal-frame apply path reading offset +0x7E8, subobject +0x680, calling 0x859700 at 0x8702A5 and 0x870460 at 0x8702AD."
+rederive    = "Recipe: recipes/witnesses.md."
+
+[[dep]]
+id          = "buffhud.ui.button-pressed-apply-witness"
+feature     = "Select skill icon cel frame on BuffHud ButtonWidget"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x870209
+size        = 26
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:55", "plugins/buffhud/src/systems/buff_hud/icon_frame_backend.cpp:149"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "26-byte block in ButtonWidget pressed-frame apply path reading offset +0x7EC, subobject +0x680, calling 0x859700 at 0x870216 and 0x870460 at 0x87021E."
+rederive    = "Recipe: recipes/witnesses.md."
+
+[[dep]]
+id          = "buffhud.ui.button-live-frame-setter"
+feature     = "Select skill icon cel frame on BuffHud ButtonWidget"
+layer       = "engine"
+kind        = "call-target"
+module      = "game"
+rva         = 0x859700
+size        = 16
+guard       = "proven-by"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:33", "plugins/buffhud/src/systems/buff_hud/icon_frame_backend.cpp:186"]
+proven_by   = ["buffhud.ui.button-normal-apply-witness", "buffhud.ui.button-pressed-apply-witness"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Live frame setter void(renderSubobject, int32 frame), verified by decoding E8 rel32 targets at 0x870216 and 0x8702A5."
+rederive    = "Follow E8 calls in ButtonWidget apply witnesses."
+
+[[dep]]
+id          = "buffhud.ui.button-refresh"
+feature     = "Select skill icon cel frame on BuffHud ButtonWidget"
+layer       = "engine"
+kind        = "call-target"
+module      = "game"
+rva         = 0x870460
+size        = 16
+guard       = "proven-by"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:75", "plugins/buffhud/src/systems/buff_hud/icon_frame_backend.cpp:188"]
+proven_by   = ["buffhud.ui.button-normal-apply-witness", "buffhud.ui.button-pressed-apply-witness"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "ButtonWidget refresh void(widget), verified by decoding E8 rel32 targets at 0x87021E and 0x8702AD."
+rederive    = "Follow E8 calls in ButtonWidget apply witnesses."
+
+[[dep]]
+id          = "buffhud.ui.button-normal-descriptor"
+feature     = "Verify ButtonWidget normalFrame offset (+0x7E8) and storage width (4)"
+layer       = "engine"
+kind        = "global"
+module      = "game"
+rva         = 0x2535580
+size        = 0x30
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:45", "plugins/buffhud/src/systems/buff_hud/icon_frame_backend.cpp:115"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Reflected field descriptor for ButtonWidget normal frame: name pointer at +0x00 -> 0x1D75670, member offset at +0x10 == 0x7E8, width at +0x20 == 4."
+rederive    = "Find descriptor referencing 0x1D75670."
+
+[[dep]]
+id          = "buffhud.ui.button-pressed-descriptor"
+feature     = "Verify ButtonWidget pressedFrame offset (+0x7EC) and storage width (4)"
+layer       = "engine"
+kind        = "global"
+module      = "game"
+rva         = 0x25355B0
+size        = 0x30
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:65", "plugins/buffhud/src/systems/buff_hud/icon_frame_backend.cpp:117"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Reflected field descriptor for ButtonWidget pressed frame: name pointer at +0x00 -> 0x1D75680, member offset at +0x10 == 0x7EC, width at +0x20 == 4."
+rederive    = "Adjacent descriptor (+0x30) referencing 0x1D75680."
+
+[[dep]]
+id          = "buffhud.ui.button-frame-names"
+feature     = "Verify ButtonWidget reflected frame descriptor name pointers"
+layer       = "engine"
+kind        = "string-anchor"
+module      = "game"
+rva         = 0x1D75670
+size        = 0x20
+guard       = "expected-bytes"
+on_mismatch = "refuse-load"
+defined_at  = ["plugins/buffhud/src/native/native_contract.hpp:47", "plugins/buffhud/src/native/native_contract.hpp:67"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Reflected field name strings at 0x1D75670 and 0x1D75680 pointed to by 0x2535580 and 0x25355B0."
+rederive    = "Read name pointers from descriptors 0x2535580 and 0x25355B0."
+
+# --- Blood Golem aura opt-out (src/systems/blood_aura, native/blood_aura_contract.hpp) ---
+# ResolveNatives checks every entry before anything is patched or called; a
+# mismatch logs "Blood Golem aura opt-out witness '<name>' ... does not match
+# this game" and only the opt-out stays off (the HUD keeps working).
+
+[[dep]]
+id          = "buffhud.blood-aura.check-state"
+feature     = "Blood Golem aura opt-out (no life-for-mana)"
+layer       = "engine"
+kind        = "call-target"
+module      = "game"
+rva         = 0x3351B0
+size        = 47
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:21", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:243"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+STATES_CheckState int32(unit, state); same 47-byte witness as monster-ai.unit.check-state.
+Never patched: BloodManaCheck calls through to it for every state and player it does not answer.
+"""
+rederive    = "Callee of the three Blood Mana sites below (and of AI init 0x4A2700)."
+
+[[dep]]
+id          = "buffhud.blood-aura.server-skill-mana-call"
+feature     = "Blood Golem aura opt-out (no life-for-mana)"
+layer       = "engine"
+kind        = "byte-patch"
+module      = "game"
+rva         = 0x436A1C
+size        = 5
+guard       = "mutation-expected"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:29", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:324"]
+proven_by   = ["buffhud.blood-aura.server-skill-mana-site"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+`call CheckState` (E8 8F E7 EF FF) with edx = 0x72 (blood_mana), staged as a Rel32 call to the
+relay cave. On a nonzero answer the server pays the skill's cost from life (0x584E80) instead of
+mana (0x2F34F0, stat 8). Committed in one MutationService transaction with the other two sites
+and the relay.
+"""
+rederive    = "Server skill-cast mana block: 0x33AA00 mana cost, then CheckState(unit, 0x72); look for `8D 50 72 .. E8` before a call to CheckState."
+rvas        = [0x436A16]
+
+[[dep]]
+id          = "buffhud.blood-aura.server-skill-mana-site"
+feature     = "Blood Golem aura opt-out (no life-for-mana)"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x436A16
+size        = 16
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:28", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:244"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "`lea edx,[rax+0x72]; mov rcx,rdi; call CheckState; mov rcx,rdi; test eax,eax` - proves the patched call reads blood_mana."
+rederive    = "See buffhud.blood-aura.server-skill-mana-call."
+
+[[dep]]
+id          = "buffhud.blood-aura.server-spend-mana-call"
+feature     = "Blood Golem aura opt-out (no life-for-mana)"
+layer       = "engine"
+kind        = "byte-patch"
+module      = "game"
+rva         = 0x436A9E
+size        = 5
+guard       = "mutation-expected"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:31", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:324"]
+proven_by   = ["buffhud.blood-aura.server-spend-mana-site"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+SpendMana int32(unit, cost) at 0x436A80: players only; CheckState(unit, 0x72) nonzero tail-jumps
+to the life drain 0x584E80, otherwise it checks and subtracts mana (stat 8). Its
+`call CheckState` (E8 0D E7 EF FF) is repointed at the relay cave.
+"""
+rederive    = "Function at 0x436A80 (prologue 48 89 5C 24 08 57 48 83 EC 20 8B FA 48 8B D9)."
+rvas        = [0x436A98, 0x436A80, 0x584E80]
+
+[[dep]]
+id          = "buffhud.blood-aura.server-spend-mana-site"
+feature     = "Blood Golem aura opt-out (no life-for-mana)"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x436A98
+size        = 16
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:30", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:245"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "`lea edx,[rax+0x72]; mov rcx,rbx; call CheckState; mov rcx,rbx; test eax,eax`."
+rederive    = "See buffhud.blood-aura.server-spend-mana-call."
+
+[[dep]]
+id          = "buffhud.blood-aura.client-predict-mana-call"
+feature     = "Blood Golem aura opt-out (client mana display while switched off)"
+layer       = "engine"
+kind        = "byte-patch"
+module      = "game"
+rva         = 0x21894A
+size        = 5
+guard       = "mutation-expected"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:33", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:324"]
+proven_by   = ["buffhud.blood-aura.client-predict-mana-site"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+Client skill-use prediction at 0x2188B0 (unit, skill, level): mana cost 0x33AA00, then
+CheckState(unit, 0x72) nonzero skips the local mana deduction (0x2F34F0, stat 8). The call
+(E8 61 C8 11 00) is repointed at the relay cave so a switched-off player's client deducts mana
+the way the server does.
+"""
+rederive    = "The only `mov edx,0x72` (BA 72 00 00 00) before a call to CheckState in the client range."
+rvas        = [0x218942, 0x2188B0]
+
+[[dep]]
+id          = "buffhud.blood-aura.client-predict-mana-site"
+feature     = "Blood Golem aura opt-out (client mana display while switched off)"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x218942
+size        = 18
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:32", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:246"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "`mov edx,0x72; mov rcx,rbx; call CheckState; test eax,eax; jnz`."
+rederive    = "See buffhud.blood-aura.client-predict-mana-call."
+
+[[dep]]
+id          = "buffhud.blood-aura.relay-cave"
+feature     = "Blood Golem aura opt-out (no life-for-mana)"
+layer       = "engine"
+kind        = "byte-patch"
+module      = "game"
+rva         = 0x437972
+size        = 12
+guard       = "mutation-expected"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:39", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:306"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+14 bytes of int3 padding after the ret at 0x437971 and before the function at 0x437980; checked
+as 14 x CC, 12 overwritten with `mov rax, BloodManaCheck; jmp rax` so the three near calls reach
+the plugin. rax is free at all three sites (it is the call's own return register).
+"""
+rederive    = "Any CC run of 12+ bytes between functions in .text within rel32 reach of the sites; pick one identical across runtimes."
+rvas        = [0x437971, 0x437980]
+
+[[dep]]
+id          = "buffhud.blood-aura.suppress-state-stats-thunk"
+feature     = "Blood Golem aura opt-out (no aura bonus stats)"
+layer       = "loader-exe"
+kind        = "import-thunk"
+module      = "game"
+rva         = 0x2F3440
+size        = 10
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:50", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:259"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+STATLIST_SuppressStateStats int32(unit, state, suppress) entry stub `FF 25 rel32 90 90 90 90` to
+D2RCore SuppressWideStateStats. The original body (still at 0x2F344A) finds the list with
+0x2F5940, unlinks it (0x2F6E50), toggles StatList+0x1C bit 0x2000 and re-posts it (0x2F2CB0).
+0x2F5940 walks both the active (+0x90) and suppressed (+0x98) chains, so the state stays visible.
+Called on the game/server thread only.
+"""
+rederive    = "Sole callee of ITEMS_ApplySetItemBonusMask (0x3D62C0); see set-enchant-fix.items.apply-set-bonus-mask."
+
+[[dep]]
+id          = "buffhud.blood-aura.suppress-state-stats-slot"
+feature     = "Blood Golem aura opt-out (no aura bonus stats)"
+layer       = "loader-exe"
+kind        = "iat-slot"
+module      = "game"
+rva         = 0x3E2A280
+size        = 8
+guard       = "proven-by"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:51"]
+proven_by   = ["buffhud.blood-aura.suppress-state-stats-thunk"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Loader `.maho` slot for SuppressStateStats; drift up to +-0x10000 resolved from the rel32 at 0x2F3440 (1.3.1: 0x3E2A280)."
+rederive    = "Decode `FF 25 rel32` at 0x2F3440; recipe recipes/loader-thunks.md."
+
+[[dep]]
+id          = "buffhud.blood-aura.unlink-statlist-thunk"
+feature     = "Blood Golem aura opt-out (switching the aura back on)"
+layer       = "loader-exe"
+kind        = "import-thunk"
+module      = "game"
+rva         = 0x2F6E50
+size        = 9
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:63", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:293"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+STATLIST unlink void(uint8 dataContext, list): `FF 25 rel32 90 90 90` bridge to D2RCore. The
+original body (0x2F6E59..) detaches the list from its owner's active (+0x90) or suppressed (+0x98)
+chain via StatList+0x78 owner, +0x68/+0x70 links, and skips the stat subtraction when +0x1C bit
+0x2000 is set. SuppressStateStats calls it first (0x2F3481). Used on switch-on: un-suppressing
+restored the stats but not the state (in game 2026-10-28), so the suppressed list is dropped and
+the aura's next pulse re-applies it from scratch.
+"""
+rederive    = "Callee of SuppressStateStats' original body at +0x41 and of PostStatList at +0x72."
+rvas        = [0x2F6E59]
+
+[[dep]]
+id          = "buffhud.blood-aura.unlink-statlist-slot"
+feature     = "Blood Golem aura opt-out (switching the aura back on)"
+layer       = "loader-exe"
+kind        = "iat-slot"
+module      = "game"
+rva         = 0x3E2A278
+size        = 8
+guard       = "proven-by"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:64"]
+proven_by   = ["buffhud.blood-aura.unlink-statlist-thunk"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Loader `.maho` slot for the unlink; drift up to +-0x10000 resolved from the rel32 at 0x2F6E50 (1.3.1: 0x3E2A278)."
+rederive    = "Decode `FF 25 rel32` at 0x2F6E50; recipe recipes/loader-thunks.md."
+
+[[dep]]
+id          = "buffhud.blood-aura.unit-data-context"
+feature     = "Blood Golem aura opt-out (switching the aura back on)"
+layer       = "engine"
+kind        = "call-target"
+module      = "game"
+rva         = 0x34A0E0
+size        = 47
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:68", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:295"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "UNITS_GetDataContext uint8(unit): returns Unit+0x1BD (asserts on null). The first argument every unlink/post caller passes (movzx ecx, al)."
+rederive    = "Called right before 0x2F6E50 in SuppressStateStats and PostStatList."
+
+[[dep]]
+id          = "buffhud.blood-aura.statlist-suppressed-flag"
+feature     = "Blood Golem aura opt-out (no aura bonus stats)"
+layer       = "engine"
+kind        = "struct-field"
+module      = "game"
+struct      = "StatList"
+offset      = 0x1C
+width       = 4
+guard       = "proven-by"
+on_mismatch = "wrong-behaviour"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:52", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:363"]
+proven_by   = ["buffhud.blood-aura.suppress-state-stats-thunk"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "StatList+0x1C bit 0x2000 = stats suppressed (set/cleared by SuppressStateStats 0x2F346D-0x2F34CC). The scan reads it to decide whether to suppress or restore."
+rederive    = "Re-read SuppressStateStats' original body after the bridge stub."
+
+[[dep]]
+id          = "buffhud.blood-aura.game-handles"
+feature     = "Blood Golem aura opt-out (no aura bonus stats)"
+layer       = "engine"
+kind        = "global"
+module      = "game"
+rva         = 0x2A9C020
+size        = 0x2000
+guard       = "proven-by"
+on_mismatch = "wrong-behaviour"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:58", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:341"]
+proven_by   = ["buffhud.blood-aura.init-client-table"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "hGameArray, 1024 x u64 game handles (0 / ~0 empty); the same walk auto-waypoint makes."
+rederive    = "lea at InitClientTable+6 (0x406216 + 7 + 0x2695E03)."
+
+[[dep]]
+id          = "buffhud.blood-aura.init-client-table"
+feature     = "Blood Golem aura opt-out (no aura bonus stats)"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x406210
+size        = 32
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:57", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:248"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "InitClientTable; its lea at +6 names hGameArray 0x2A9C020."
+rederive    = "Same witness as auto-waypoint's InitClientTable."
+
+[[dep]]
+id          = "buffhud.blood-aura.get-game-by-handle"
+feature     = "Blood Golem aura opt-out (no aura bonus stats)"
+layer       = "engine"
+kind        = "call-target"
+module      = "game"
+rva         = 0x4062F0
+size        = 137
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:60", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:249"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Game* GetGameByHandle(u64 handle); whole body witnessed (same bytes as auto-waypoint)."
+rederive    = "Same witness as auto-waypoint's GetGameByHandle."
+
+[[dep]]
+id          = "buffhud.blood-aura.player-list"
+feature     = "Blood Golem aura opt-out (no aura bonus stats)"
+layer       = "engine"
+kind        = "struct-field"
+module      = "game"
+struct      = "Game / Unit"
+offset      = 0x2230
+width       = 0x400
+guard       = "proven-by"
+on_mismatch = "wrong-behaviour"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:63", "plugins/buffhud/src/native/blood_aura_contract.hpp:65", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:341"]
+proven_by   = ["buffhud.blood-aura.unit-list-bucket", "buffhud.blood-aura.get-server-unit"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "Game+0x2230 = 128 player hash buckets (UnitListBucket type 0: Game+0x446*8), chained through Unit+0x158 (GetServerUnit). Walk bounded to 4096 per bucket."
+rederive    = "Re-read UnitListBucket and GetServerUnit."
+
+[[dep]]
+id          = "buffhud.blood-aura.unit-list-bucket"
+feature     = "Blood Golem aura opt-out (no aura bonus stats)"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x4925B0
+size        = 112
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:62", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:251"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "UnitListBucket(type, game, id): type 0 -> Game + (0x446 + (id & 0x7F)) * 8."
+rederive    = "Same witness as auto-waypoint's UnitListBucket."
+
+[[dep]]
+id          = "buffhud.blood-aura.get-server-unit"
+feature     = "Blood Golem aura opt-out (no aura bonus stats)"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x48FE80
+size        = 122
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:61", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:250"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "FindServerUnit: compares Unit+0x08 with the id and follows Unit+0x158."
+rederive    = "Same witness as auto-waypoint's GetServerUnit."
+
+[[dep]]
+id          = "buffhud.blood-aura.player-name"
+feature     = "Blood Golem aura opt-out (matching a player to their choice)"
+layer       = "engine"
+kind        = "struct-field"
+module      = "game"
+struct      = "Unit / PlayerData"
+offset      = 0x10
+width       = 8
+guard       = "proven-by"
+on_mismatch = "wrong-behaviour"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:73", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:172"]
+proven_by   = ["buffhud.blood-aura.get-player-data"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+Unit+0x00 type (0 = player); Unit+0x10 PlayerData, whose first 16 bytes are the NUL-terminated
+character name - the same read libs/image-scan CharacterIdentity makes on the client. Read under
+SEH; a name that is not printable ASCII within 16 bytes matches nobody.
+"""
+rederive    = "GetPlayerData returns [unit+0x10] after asserting type 0."
+
+[[dep]]
+id          = "buffhud.blood-aura.get-player-data"
+feature     = "Blood Golem aura opt-out (matching a player to their choice)"
+layer       = "engine"
+kind        = "code-witness"
+module      = "game"
+rva         = 0x34B240
+size        = 68
+guard       = "expected-bytes"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:71", "plugins/buffhud/src/systems/blood_aura/blood_aura.cpp:252"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = "GetPlayerData(unit): asserts type 0, returns [unit+0x10]."
+rederive    = "Same witness as auto-waypoint's GetPlayerData."
+
+[[dep]]
+id          = "buffhud.blood-aura.blood-mana-state"
+feature     = "Blood Golem aura opt-out"
+layer       = "data"
+kind        = "table-layout"
+module      = "game"
+struct      = "states.txt"
+offset      = 0x72
+width       = 4
+guard       = "none"
+on_mismatch = "wrong-behaviour"
+defined_at  = ["plugins/buffhud/src/native/blood_aura_contract.hpp:17", "plugins/buffhud/src/systems/blood_aura/blood_aura.hpp:27"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+states.txt row 114 (0x72) is blood_mana, the aurastate/auratargetstate of Reimagined's BloodAura
+(skills.txt *Id 450, granted by BloodGolem *Id 85, whose icon the HUD uses). The engine's Blood
+Mana reads load the literal 0x72, so the id is what matters; a mod that renumbered states would
+break the engine rule as well.
+"""
+rederive    = "Look up blood_mana in the mod's states.txt and BloodAura/BloodGolem in skills.txt."
+
+[[dep]]
+id          = "buffhud.blood-aura.wire"
+feature     = "Blood Golem aura opt-out and buffs for joined players (player <-> host)"
+layer       = "sdk"
+kind        = "wire-format"
+module      = "game"
+struct      = "Buff HUD channel 1: message 1 Preference (client->host), message 2 buff list (host->client)"
+offset      = 0
+width       = 224
+guard       = "none"
+on_mismatch = "feature-off"
+defined_at  = ["plugins/buffhud/src/systems/blood_aura/blood_aura_policy.hpp:54", "plugins/buffhud/src/core/remote_buffs.hpp:16"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+NetworkService channel 1, token 0x4255464648554402 ("BUFFHUD" + 2). Preference (24 bytes): u8
+version (1), u8 auraOff, u16 flags (bit 0 = wants buffs: a joined client whose own unit has no
+game clock), u32 playerId, char name[16]. Buff list: u8 version (1), u8 count, u8 flags (bit 0 =
+in the Blood Golem aura on the server, switched off or not), u8 reserved,
+then count x {u16 state, i16 skill, i32 value (frames left, or resource current), i32 maximum},
+at most 18 to stay within the 224-byte payload. The token's last byte changes with either
+message, so mismatched copies refuse to connect.
+"""
+rederive    = "Own format."
+
+[[dep]]
+id          = "buffhud.remote-buffs.server-unit-reads"
+feature     = "Buffs for players who joined a dedicated server or a player's TCP/IP host"
+layer       = "engine"
+kind        = "struct-field"
+module      = "game"
+struct      = "server player Unit: StatList metadata, game frame"
+offset      = 0x1C
+width       = 0x14
+guard       = "proven-by"
+on_mismatch = "wrong-behaviour"
+defined_at  = ["plugins/buffhud/src/systems/buff_tracker/buff_tracker.cpp:938"]
+proven_by   = ["buffhud.blood-aura.player-list", "buffhud.blood-aura.get-game-by-handle"]
+verified_on = ["loader-2026-09-17", "loader-1.3.1-beta"]
+evidence    = """
+A joined client's own copy of its player has no game (UNITS_GetGame returns null; confirmed in
+game 2026-10-28: "frame 0 (no clock)" all game), so the host reads each joined player's server
+unit during its scan with the tracker's existing reads - STATLIST_GetStatListFromUnitAndState,
+the StatList buff metadata (+0x1C flags, +0x20 state, +0x24 expire frame, +0x28 skill),
+UNITS_GetGame and Game+0x170 frame, STATLIST_GetUnitStat for resource pools - and sends the
+result over buffhud.blood-aura.wire. No new address; the entries named in proven_by and the
+tracker's own witnesses cover them.
+"""
+rederive    = "Same reads as the local tracker; see buffhud.statlist.* and buffhud.stat.*."

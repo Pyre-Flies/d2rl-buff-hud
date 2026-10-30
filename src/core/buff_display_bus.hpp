@@ -31,6 +31,15 @@ enum class BuffIconAtlas : std::uint8_t {
     Global,
 };
 
+// An entry the player can switch off from the HUD (the Blood Golem aura). The
+// slot shows a checkbox, and "OFF" while switched off; it never counts down.
+enum class BuffToggle : std::uint8_t {
+    None = 0,
+    On = 1,
+    Off = 2,
+    Unavailable = 3, // shown, but this game cannot honour a change
+};
+
 struct BuffDisplayEntry final {
     std::uint64_t key{};
     std::int32_t sourceSkillId{NoSourceSkillId};
@@ -45,6 +54,7 @@ struct BuffDisplayEntry final {
     std::uint16_t stacks{1};
     std::int16_t priority{};
     std::uint64_t sequence{};
+    BuffToggle toggle{BuffToggle::None};
 };
 
 struct BuffDisplaySnapshot final {

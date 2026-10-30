@@ -167,6 +167,7 @@ int main() {
     const auto* slamState = FindByState(resolved.entries, 238);
     assert(slamState != nullptr);
     assert(!slamState->isResource);
+    assert(slamState->sourceSkillId == 405);
 
     const auto* shrineArmor = FindByState(resolved.entries, 128);
     assert(shrineArmor != nullptr && !shrineArmor->isResource);

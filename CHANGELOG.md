@@ -1,5 +1,11 @@
 # Buff HUD changelog
 
+## 1.3.1+rev.3 - 2026-10-28
+- Sync with Reimagined `d2rl-buffhud` `1.3.1+rev.3` (`d2rl-buffhud.dll` + `d2rl-buffhud.mpq`):
+  - **Joined-game / dedicated-server (`d2rds`) multiplayer sync:** Stream server-unit buff snapshots (~1 Hz over plugin network channel 1) to joined clients that have no local `D2GameStrc` clock, with 25 Hz client timer interpolation.
+  - **Blood Golem aura (`blood_mana`) opt-out toggle:** Add per-character `AuraCheck` slot-0 checkbox and `buff-blood-aura [status|on|off]` console command backed by host-side `blood_mana` cast/spend bypass and `STATLIST_SuppressStateStats`.
+  - **Shared hover tooltip boxes & quick-cast clearance:** Replace 21 disabled per-slot `Tooltip` child widgets with shared `HoverBox<row><S|M|L>` widgets driven by window-message hit testing, and shift `BuffGrid.fields.rect.y` to `-665` to clear D2R's quick-cast skill row.
+
 ## 1.1.2 - 2026-10-28
 - Cut per-frame CPU overhead by ~97% (0.2186 ms -> 0.0060 ms/frame) by gating state scans to the 25 Hz game clock, replacing per-read VirtualQuery syscalls with table-based SEH reads, and caching slot visibility/enabled states.
 - Derive the runtime buff catalog automatically from the active mod's states.txt, skills.txt, and itemstatcost.txt (with optional loose buff-hud.txt override support), removing the compiled custom table from the companion MPQ.

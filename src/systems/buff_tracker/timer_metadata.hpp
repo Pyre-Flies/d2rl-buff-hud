@@ -17,6 +17,13 @@ struct TimerMetadata final {
 };
 
 constexpr std::uint32_t MaximumTimerFrames = 25u * 60u * 60u * 24u * 7u;
+constexpr std::uint32_t StatListTempFlag = 0x00000002u;
+constexpr std::uint32_t StatListCurseFlag = 0x00000020u;
+constexpr std::uint32_t StatListSuppressedFlag = 0x00002000u;
+constexpr std::uint32_t StatListDisabledFlag = 0x40000000u;
+constexpr std::uint32_t StatListExtendedFlag = 0x80000000u;
+constexpr std::uint32_t StatListInvalidTimerFlags =
+    StatListCurseFlag | StatListSuppressedFlag | StatListDisabledFlag | StatListExtendedFlag;
 
 [[nodiscard]] inline std::uint32_t TimerSkill(
     const TimerMetadata& metadata, std::uint32_t configuredSkill) noexcept {
@@ -33,7 +40,9 @@ constexpr std::uint32_t MaximumTimerFrames = 25u * 60u * 60u * 24u * 7u;
     skill = TimerSkill(metadata, configuredSkill);
     expiry = 0;
     if (expectedState == 0 || metadata.state != expectedState || currentFrame == 0
-        || skill == 0 || skill > 4095 || (metadata.flags & 0x20u) != 0
+        || skill == 0 || skill > 4095
+        || (metadata.flags & StatListTempFlag) == 0
+        || (metadata.flags & StatListInvalidTimerFlags) != 0
         || !std::isfinite(metadata.expireFrameFloat)) {
         return false;
     }

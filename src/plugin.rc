@@ -2,8 +2,8 @@
 #include <D2RLPlugin/version.h>
 D2RL_PLUGIN_MANIFEST_RESOURCE_ID RCDATA { D2RL_PLUGIN_RESOURCE_DWORD(D2RL_PLUGIN_ABI_VERSION) }
 1 VERSIONINFO
-FILEVERSION 1,1,2,0
-PRODUCTVERSION 1,1,2,0
+FILEVERSION 1,3,1,3
+PRODUCTVERSION 1,3,1,3
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -13,11 +13,11 @@ BEGIN
       VALUE "Author", "MindH1ve"
       VALUE "LegalCopyright", "Copyright (C) MindH1ve"
       VALUE "FileDescription", "D2RLoader configurable buff HUD and timer plugin"
-      VALUE "FileVersion", "1.1.2"
-      VALUE "InternalName", "buff-panel"
-      VALUE "OriginalFilename", "d2rl-buff-panel.dll"
+      VALUE "FileVersion", "1.3.1+rev.3"
+      VALUE "InternalName", "buffhud"
+      VALUE "OriginalFilename", "d2rl-buffhud.dll"
       VALUE "ProductName", "Buff HUD"
-      VALUE "ProductVersion", "1.1.2"
+      VALUE "ProductVersion", "1.3.1+rev.3"
     END
   END
   BLOCK "VarFileInfo"

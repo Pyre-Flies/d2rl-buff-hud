@@ -9,7 +9,7 @@
 namespace BuffPanel::Systems::BuffTracker::LooseBuffHud {
 
 inline constexpr std::string_view VirtualPath =
-    "data/global/excel/d2rloader/buff-panel/buff-hud.txt";
+    "data/global/excel/d2rloader/buffhud/buff-hud.txt";
 inline constexpr std::string_view ExcelDirectoryRelativePath =
     "data/global/excel";
 inline constexpr std::size_t MaximumBytes = 1024u * 1024u;

@@ -583,8 +583,13 @@ bool LoadCatalogFromExcelDirectory(
             std::int32_t skillId{};
             bool hasClass{};
         };
+        struct TimerSkillCandidate final {
+            std::int32_t skillId{};
+            bool hasClass{};
+            bool exactTargetState{};
+        };
         std::unordered_map<std::uint32_t, ResourceCandidate> resourceByState;
-        std::unordered_map<std::uint32_t, std::int32_t> timerSkillByState;
+        std::unordered_map<std::uint32_t, TimerSkillCandidate> timerSkillByState;
         std::unordered_set<std::uint32_t> timerStates;
 
         for (std::size_t row = 0; row < skillsTable.RowCount(); ++row) {
@@ -627,9 +632,35 @@ bool LoadCatalogFromExcelDirectory(
                 && (hasClass || IsAllowedUncategorizedBuffState(auraState))) {
                 timerStates.insert(stateInfo.id);
                 const auto targetState = skillsTable.Cell(row, auraTargetStateCol);
-                if (hasClass && EqualsNoCase(auraState, targetState)) {
-                    timerSkillByState[stateInfo.id] = skillId;
+                const bool exactTarget = EqualsNoCase(auraState, targetState);
+                const TimerSkillCandidate candidate{
+                    .skillId = skillId,
+                    .hasClass = hasClass,
+                    .exactTargetState = exactTarget,
+                };
+                const auto existing = timerSkillByState.find(stateInfo.id);
+                if (existing == timerSkillByState.end()
+                    || (candidate.hasClass && !existing->second.hasClass)
+                    || (candidate.hasClass == existing->second.hasClass
+                        && candidate.exactTargetState && !existing->second.exactTargetState)) {
+                    timerSkillByState[stateInfo.id] = candidate;
                 }
+            }
+        }
+
+        std::string builtinError;
+        std::vector<CatalogEntry> builtinEntries;
+        (void)ParseCatalogFromTsv(DefaultCatalogTsv, builtinEntries, builtinError);
+        for (const auto& builtin : builtinEntries) {
+            if (!builtin.isResource && builtin.sourceSkillId > 0
+                && timerSkillByState.find(builtin.stateId) == timerSkillByState.end()) {
+                timerSkillByState.emplace(
+                    builtin.stateId,
+                    TimerSkillCandidate{
+                        .skillId = builtin.sourceSkillId,
+                        .hasClass = false,
+                        .exactTargetState = false,
+                    });
             }
         }
 
@@ -658,7 +689,7 @@ bool LoadCatalogFromExcelDirectory(
                 .isResource = false,
                 .valueStatId = 0,
                 .maxStatId = 0,
-                .sourceSkillId = skIt != timerSkillByState.end() ? skIt->second : 0,
+                .sourceSkillId = skIt != timerSkillByState.end() ? skIt->second.skillId : 0,
                 .valueShift = 0u,
             });
         }

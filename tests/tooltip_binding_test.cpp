@@ -7,6 +7,22 @@
 #include <cassert>
 #include <iostream>
 
+// Mouse input and the Blood Golem aura opt-out are not part of this binding
+// test; the HUD only sees a player who is never in the aura.
+namespace BuffPanel::Systems::BuffHud::HudInput {
+void Initialize(const D2RL::PluginContext*, HoverCallback) noexcept {}
+void Shutdown() noexcept {}
+void InstallInput() noexcept {}
+void Publish(const SlotAreas&, int) noexcept {}
+void Describe(char* output, std::size_t size) noexcept { if (size != 0) output[0] = '\0'; }
+} // namespace BuffPanel::Systems::BuffHud::HudInput
+namespace BuffPanel::Systems::BloodAura {
+bool LocalAuraOff() noexcept { return false; }
+bool CanToggle() noexcept { return false; }
+bool LocalPlayerInAura() noexcept { return false; }
+} // namespace BuffPanel::Systems::BloodAura
+namespace BuffPanel::Systems::BuffTracker { void TickRemoteClock() noexcept {} }
+
 namespace H = BuffPanel::Systems::BuffHud;
 namespace {
 alignas(8) std::array<std::byte, 0x1000> Widget{};

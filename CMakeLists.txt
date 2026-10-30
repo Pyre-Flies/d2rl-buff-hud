@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.29)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(BuffPanel VERSION 1.1.2 LANGUAGES CXX RC)
+    project(BuffPanel VERSION 1.3.1.3 LANGUAGES CXX RC)
 elseif(WIN32)
     enable_language(RC)
 endif()
@@ -32,6 +32,16 @@ else()
     message(FATAL_ERROR "Buff HUD requires PluginSDK 0.3.0 or a Suite-provided ABI-4 PluginSDK target.")
 endif()
 
+if(NOT TARGET D2RL::ImageScan)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/external/image-scan" "${CMAKE_CURRENT_BINARY_DIR}/_deps/image-scan" EXCLUDE_FROM_ALL)
+endif()
+if(NOT TARGET D2RL::ServerThread)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/external/server-thread" "${CMAKE_CURRENT_BINARY_DIR}/_deps/server-thread" EXCLUDE_FROM_ALL)
+endif()
+if(NOT TARGET D2RL::SessionSecrets)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/external/session-secrets" "${CMAKE_CURRENT_BINARY_DIR}/_deps/session-secrets" EXCLUDE_FROM_ALL)
+endif()
+
 add_library(buff_panel SHARED
     src/plugin.cpp
     src/plugin.rc
@@ -43,16 +53,25 @@ add_library(buff_panel SHARED
     src/systems/buff_tracker/buff_tracker.cpp
     src/systems/buff_tracker/loose_buff_hud.cpp
     src/systems/buff_hud/buff_hud.cpp
+    src/systems/buff_hud/hud_input.cpp
     src/systems/buff_hud/icon_frame_backend.cpp
     src/systems/buff_hud/skill_icon_resolver.cpp
+    src/systems/blood_aura/blood_aura.cpp
 )
 target_include_directories(buff_panel PRIVATE src)
-target_link_libraries(buff_panel PRIVATE ${BUFF_PANEL_SDK_TARGET})
+target_link_libraries(buff_panel PRIVATE
+    ${BUFF_PANEL_SDK_TARGET}
+    D2RL::ImageScan
+    D2RL::ServerThread
+    D2RL::SessionSecrets
+    shell32
+    ole32
+)
 target_compile_features(buff_panel PRIVATE cxx_std_20)
 target_compile_definitions(buff_panel PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_compile_options(buff_panel PRIVATE /W4 /permissive- /utf-8 /EHsc)
 set_target_properties(buff_panel PROPERTIES
-    OUTPUT_NAME "d2rl-buff-panel"
+    OUTPUT_NAME "d2rl-buffhud"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stage/$<CONFIG>/d2rloader/plugins"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib/$<CONFIG>"
     PDB_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/pdb/$<CONFIG>"
@@ -70,7 +89,7 @@ target_compile_options(buff_panel_validate PRIVATE /utf-8 /EHsc)
 
 set(BUFF_PANEL_SDK_LICENSE_FILE "${BUFF_PANEL_SDK_DIR}/LICENSE" CACHE FILEPATH "PluginSDK license to include in dist")
 set(D2RL_COMPILER "${CMAKE_CURRENT_SOURCE_DIR}/external/D2RLCompiler/D2RLCompiler.exe" CACHE FILEPATH "Repository-pinned D2RLCompiler.exe used to pack the companion MPQ")
-set(BUFF_PANEL_LAYOUT "${CMAKE_CURRENT_SOURCE_DIR}/companion/data/global/ui/layouts/buff-panel/BuffHudhd.json")
+set(BUFF_PANEL_LAYOUT "${CMAKE_CURRENT_SOURCE_DIR}/companion/data/global/ui/layouts/buffhud/BuffHudhd.json")
 # Run on every build so an asset-only edit (or deletion) cannot leave a stale MPQ.
 add_custom_target(buff_panel_companion
     COMMAND buff_panel_validate "${BUFF_PANEL_LAYOUT}"
@@ -78,7 +97,7 @@ add_custom_target(buff_panel_companion
     COMMAND "${CMAKE_COMMAND}"
         "-DD2RL_COMPILER=${D2RL_COMPILER}"
         "-DBUFF_PANEL_COMPANION_DIR=${CMAKE_CURRENT_SOURCE_DIR}/companion"
-        "-DBUFF_PANEL_COMPANION_OUTPUT=$<TARGET_FILE_DIR:buff_panel>/d2rl-buff-panel.mpq"
+        "-DBUFF_PANEL_COMPANION_OUTPUT=$<TARGET_FILE_DIR:buff_panel>/d2rl-buffhud.mpq"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PackCompanion.cmake"
     DEPENDS buff_panel_validate
     COMMENT "Validating and packing Buff HUD companion resources"
@@ -129,6 +148,11 @@ if(BUFF_PANEL_BUILD_TESTS)
     target_compile_definitions(skill_icon_resolver_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_compile_options(skill_icon_resolver_test PRIVATE /utf-8 /EHsc)
     add_test(NAME skill_icon_resolver COMMAND skill_icon_resolver_test)
+    add_executable(blood_aura_policy_test tests/blood_aura_policy_test.cpp)
+    target_include_directories(blood_aura_policy_test PRIVATE src)
+    target_compile_features(blood_aura_policy_test PRIVATE cxx_std_20)
+    target_compile_options(blood_aura_policy_test PRIVATE /utf-8 /EHsc)
+    add_test(NAME blood_aura_policy COMMAND blood_aura_policy_test)
     foreach(kind IN ITEMS layout buff_hud)
         add_executable(loose_${kind}_test tests/loose_${kind}_test.cpp)
         if(kind STREQUAL "layout")

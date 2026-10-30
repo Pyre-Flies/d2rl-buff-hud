@@ -6,6 +6,7 @@
 #include "core/stat_list_post_bus.hpp"
 #include "core/buff_display_bus.hpp"
 #include "native/native_contract.hpp"
+#include "systems/blood_aura/blood_aura.hpp"
 #include "systems/buff_hud/buff_hud.hpp"
 #include "systems/buff_tracker/buff_tracker.hpp"
 
@@ -14,20 +15,21 @@ namespace BuffPanel {
 namespace {
 
 static_assert(D2RL_PLUGIN_ABI_VERSION == 4,
-    "Buff HUD 1.1.2 requires D2RLoader PluginSDK 0.3.0 / plugin ABI 4.");
+    "Buff HUD 1.3.1+rev.3 requires D2RLoader PluginSDK 0.3.0 / plugin ABI 4.");
 
 constexpr D2RL::PluginInfo Info{
     .infoSize = D2RL::PluginInfoSize,
     .abiVersion = D2RL_PLUGIN_ABI_VERSION,
-    .id = "buff-panel",
+    .id = "buffhud",
     .name = "Buff HUD",
-    .version = "1.1.2",
+    .version = "1.3.1+rev.3",
     .author = "MindH1ve",
     .description = "Standalone configurable D2RLoader buff HUD and countdown timers.",
     .flags = D2RL::PluginFlags::Shared | D2RL::PluginFlags::NativeHooks,
 };
 
 void ShutdownRuntime() noexcept {
+    Systems::BloodAura::Shutdown();
     Systems::BuffTracker::Shutdown();
     Systems::BuffHud::Shutdown();
     Core::StatListPosts().Reset();
@@ -66,7 +68,9 @@ D2RL_PLUGIN_EXPORT bool __cdecl D2RLoaderLoadPlugin(
         ShutdownRuntime();
         return false;
     }
-    context->LogInfo("Buff HUD 1.1.2 loaded (D2R build 93847; PluginSDK 0.3.0/ABI 4).");
+    // Optional: logs and stays off when this game cannot honour it.
+    Systems::BloodAura::Initialize(context);
+    context->LogInfo("Buff HUD 1.3.1+rev.3 loaded (D2R build 93847; PluginSDK 0.3.0/ABI 4).");
     return true;
 }
 

@@ -2,10 +2,13 @@
 #include "tooltip_text.hpp"
 
 #include "core/buff_display_bus.hpp"
+#include "hud_input.hpp"
 #include "core/services.hpp"
 #include "icon_frame_backend.hpp"
 #include "native/native_contract.hpp"
 #include "skill_icon_resolver.hpp"
+#include "systems/blood_aura/blood_aura.hpp"
+#include "systems/buff_tracker/buff_tracker.hpp"
 
 #include <Windows.h>
 
@@ -41,6 +44,37 @@ static_assert(TooltipReserveCodepoints * 3 == TooltipReserveLength);
 constexpr std::size_t TooltipNativeScanBytes = 0x1000;
 constexpr std::uint32_t NoRenderedSeconds = std::numeric_limits<std::uint32_t>::max();
 constexpr std::int32_t NoRenderedValue = std::numeric_limits<std::int32_t>::min();
+
+// The Blood Golem aura is not in the buff catalog (no duration, no class). Its
+// entry comes from BloodAura, always takes slot 0 (top priority) and shows
+// BuffHudhd.json's AuraCheck there: D2R's own checkbox sprite, frame 4 ticked
+// and 0 empty, set through the qualified ButtonWidget frame path. Clicking the
+// slot flips it (HudInput). Grid and slot fallbacks are the JSON's own rects,
+// used if a rect cannot be read.
+constexpr std::uint64_t BloodAuraKey = 0xB100'DA0B'A000'0072ULL;
+constexpr std::int16_t BloodAuraPriority = 1000;
+constexpr std::uint16_t CheckedFrame = 4;
+constexpr std::uint16_t UncheckedFrame = 0;
+constexpr D2RL::Widgets::Rect GridFallbackRect{-150, -665, 780, 300};
+constexpr std::int32_t SlotFallbackPitchX = 112;
+constexpr std::int32_t SlotFallbackPitchY = 105;
+constexpr std::int32_t SlotFallbackBottomY = 210;
+constexpr std::int32_t SlotFallbackEdge = 96;
+constexpr std::size_t SlotsPerRow = 7;
+
+// BuffHudhd.json HoverBox<row><size>: D2R's tooltip frame (TooltipBorder, 80%
+// black) naming the hovered buff. A layout box cannot size itself to its text or
+// move, so there are three widths (S/M/L) at three heights, each just above one
+// row of slots; the one used fits the text and sits over the top occupied row.
+// Each box's Text starts as this reserve and is overwritten in place, the same
+// way the countdowns are.
+constexpr char HoverReserve[] = "__BUFF_PANEL_HOVER_LABEL_RESERVE_______________________________";
+constexpr std::size_t HoverReserveBytes = sizeof(HoverReserve);
+static_assert(HoverReserveBytes == 64);
+constexpr std::size_t HoverRows = 3;
+constexpr std::array<char, 3> HoverSizes{'S', 'M', 'L'};
+constexpr std::array<std::size_t, 2> HoverSizeLimits{12, 22}; // characters that fit S, M
+constexpr std::size_t HoverBoxCount = HoverRows * HoverSizes.size();
 
 enum class TooltipStorageEncoding : std::uint8_t {
     Unknown = 0,
@@ -118,6 +152,9 @@ struct SlotHandles final {
     D2RL::Widgets::WidgetHandle slot{D2RL::Widgets::InvalidHandle};
     std::array<D2RL::Widgets::WidgetHandle, AtlasCount> icons{};
     D2RL::Widgets::WidgetHandle countdown{D2RL::Widgets::InvalidHandle};
+    // BuffHudhd.json no longer has per-slot Tooltip widgets (hover goes through
+    // HudInput and HoverLabel); a layout override that still has them gets their
+    // native hover text as before.
     D2RL::Widgets::WidgetHandle tooltip{D2RL::Widgets::InvalidHandle};
 };
 
@@ -132,6 +169,7 @@ struct SlotRenderState final {
     std::int32_t currentValue{NoRenderedValue};
     std::int32_t maximumValue{NoRenderedValue};
     std::int32_t sourceSkillId{Core::NoSourceSkillId};
+    Core::BuffToggle toggle{Core::BuffToggle::None};
     bool timerVisible{};
     bool tooltipVisible{};
     std::uintptr_t qualifiedTimerBuffer{};
@@ -143,6 +181,18 @@ struct SlotRenderState final {
 
 D2RL::Widgets::WidgetHandle HudPanel{D2RL::Widgets::InvalidHandle};
 D2RL::Widgets::WidgetHandle GridWidget{D2RL::Widgets::InvalidHandle};
+// Optional (absent from older layout overrides): slot 0's checkbox and the
+// hover boxes. Every SDK lookup holds a widget handle; per-slot additions broke
+// handle resolution in game (2026-10-28), so these stay few.
+D2RL::Widgets::WidgetHandle AuraCheck{D2RL::Widgets::InvalidHandle};
+std::array<D2RL::Widgets::WidgetHandle, HoverBoxCount> HoverBoxes{};
+std::array<std::uintptr_t, HoverBoxCount> HoverBuffers{};
+bool AuraCheckShown{};
+std::uint16_t AuraCheckFrame{std::numeric_limits<std::uint16_t>::max()};
+int HoverBoxShown{-1};
+int HoverSlotShown{-1};
+std::array<Core::BuffDisplayEntry, SlotCount> SlotEntries{};
+std::size_t SlotEntryCount{};
 std::array<SlotHandles, SlotCount> Handles{};
 std::array<SlotRenderState, SlotCount> RenderStates{};
 bool HandlesResolved{};
@@ -299,6 +349,24 @@ void MakeTooltipReserveUtf16(std::size_t slotIndex, std::array<std::uint16_t, To
 [[nodiscard]] bool SetEnabled(D2RL::Widgets::WidgetHandle handle, bool enabled) noexcept;
 [[nodiscard]] bool ApplyInputIsolation() noexcept;
 
+// A failed lookup leaves every slot showing its layout placeholders, so say
+// which one failed - once, until a lookup succeeds again.
+bool ResolveFailureLogged{};
+
+[[nodiscard]] bool FindHandle(D2RL::Widgets::WidgetHandle parent, const char* name, std::size_t slot,
+    D2RL::Widgets::WidgetHandle& handle) noexcept {
+    const auto result = Widgets->findWidget(Context, parent, name, &handle);
+    if (result == D2RL::Widgets::Result::Success) return true;
+    if (!ResolveFailureLogged) {
+        ResolveFailureLogged = true;
+        char line[192]{};
+        std::snprintf(line, sizeof(line), "Buff HUD: widget lookup '%s' (slot %zu) failed with result %u; the HUD cannot draw.",
+            name, slot, static_cast<unsigned>(result));
+        Context->LogWarn(line);
+    }
+    return false;
+}
+
 [[nodiscard]] bool ResolveWidgetHandles() noexcept {
     if (HandlesResolved) return true;
     if (Context == nullptr || Widgets == nullptr) return false;
@@ -307,8 +375,8 @@ void MakeTooltipReserveUtf16(std::size_t slotIndex, std::array<std::uint16_t, To
     GridWidget = D2RL::Widgets::InvalidHandle;
     Handles = {};
 
-    if (Widgets->findPanel(Context, "buff-panel/BuffHud", &HudPanel) != D2RL::Widgets::Result::Success
-        || Widgets->findWidget(Context, HudPanel, "BuffGrid", &GridWidget) != D2RL::Widgets::Result::Success) {
+    if (Widgets->findPanel(Context, "buffhud/BuffHud", &HudPanel) != D2RL::Widgets::Result::Success
+        || !FindHandle(HudPanel, "BuffGrid", 0, GridWidget)) {
         return false;
     }
 
@@ -316,24 +384,22 @@ void MakeTooltipReserveUtf16(std::size_t slotIndex, std::array<std::uint16_t, To
         char slotName[24]{};
         std::snprintf(slotName, sizeof(slotName), "BuffSlot%02zu", i);
         auto& slot = Handles[i];
-        if (Widgets->findWidget(Context, GridWidget, slotName, &slot.slot)
-            != D2RL::Widgets::Result::Success) {
+        if (!FindHandle(GridWidget, slotName, i, slot.slot)) {
             Handles = {};
             return false;
         }
         for (std::size_t atlas = 0; atlas < AtlasCount; ++atlas) {
-            if (Widgets->findWidget(Context, slot.slot, AtlasWidgetNames[atlas], &slot.icons[atlas])
-                != D2RL::Widgets::Result::Success) {
+            if (!FindHandle(slot.slot, AtlasWidgetNames[atlas], i, slot.icons[atlas])) {
                 Handles = {};
                 return false;
             }
         }
-        if (Widgets->findWidget(Context, slot.slot, "Countdown", &slot.countdown)
-            != D2RL::Widgets::Result::Success
-            || Widgets->findWidget(Context, slot.slot, "Tooltip", &slot.tooltip)
-                != D2RL::Widgets::Result::Success) {
+        if (!FindHandle(slot.slot, "Countdown", i, slot.countdown)) {
             Handles = {};
             return false;
+        }
+        if (Widgets->findWidget(Context, slot.slot, "Tooltip", &slot.tooltip) != D2RL::Widgets::Result::Success) {
+            slot.tooltip = D2RL::Widgets::InvalidHandle;
         }
 
         // ButtonWidget visibility alone does not guarantee that D2R removes its
@@ -348,8 +414,19 @@ void MakeTooltipReserveUtf16(std::size_t slotIndex, std::array<std::uint16_t, To
             }
         }
     }
+    if (Widgets->findWidget(Context, Handles[0].slot, "AuraCheck", &AuraCheck) != D2RL::Widgets::Result::Success) {
+        AuraCheck = D2RL::Widgets::InvalidHandle;
+    }
+    for (std::size_t i = 0; i < HoverBoxCount; ++i) {
+        char name[16]{};
+        std::snprintf(name, sizeof(name), "HoverBox%zu%c", i / HoverSizes.size(), HoverSizes[i % HoverSizes.size()]);
+        if (Widgets->findWidget(Context, GridWidget, name, &HoverBoxes[i]) != D2RL::Widgets::Result::Success) {
+            HoverBoxes[i] = D2RL::Widgets::InvalidHandle;
+        }
+    }
 
     HandlesResolved = true;
+    ResolveFailureLogged = false;
     (void)ApplyInputIsolation();
     return true;
 }
@@ -413,6 +490,15 @@ void RestoreQualifiedTooltipBuffers() noexcept {
 void InvalidateWidgetHandles() noexcept {
     HudPanel = D2RL::Widgets::InvalidHandle;
     GridWidget = D2RL::Widgets::InvalidHandle;
+    AuraCheck = D2RL::Widgets::InvalidHandle;
+    HoverBoxes = {};
+    HoverBuffers = {};
+    AuraCheckShown = false;
+    AuraCheckFrame = std::numeric_limits<std::uint16_t>::max();
+    HoverBoxShown = -1;
+    HoverSlotShown = -1;
+    SlotEntries = {};
+    SlotEntryCount = 0;
     Handles = {};
     RenderStates = {};
     HandlesResolved = false;
@@ -444,6 +530,7 @@ void InvalidateWidgetHandles() noexcept {
     if (!HandlesResolved || Context == nullptr || Widgets == nullptr) return false;
     bool allSucceeded = true;
     auto disable = [&](D2RL::Widgets::WidgetHandle handle) noexcept {
+        if (handle == D2RL::Widgets::InvalidHandle) return; // optional widget absent
         if (!SetEnabled(handle, false)) allSucceeded = false;
     };
     for (auto& slot : Handles) {
@@ -451,6 +538,8 @@ void InvalidateWidgetHandles() noexcept {
         disable(slot.tooltip);
         for (const auto icon : slot.icons) disable(icon);
     }
+    disable(AuraCheck);
+    for (const auto box : HoverBoxes) disable(box);
     disable(GridWidget);
     disable(HudPanel);
     if (!allSucceeded) Context->LogWarn(
@@ -470,7 +559,7 @@ void InvalidateWidgetHandles() noexcept {
         || slotIndex >= SlotCount || childName == nullptr) {
         return nullptr;
     }
-    void* panel = FindTopLevelPanel("buff-panel/BuffHud");
+    void* panel = FindTopLevelPanel("buffhud/BuffHud");
     void* grid = panel != nullptr ? FindChildWidgetByName(panel, "BuffGrid") : nullptr;
     void* slot = ResolveNativeSlotFromGrid(grid, slotIndex);
     return slot != nullptr ? FindChildWidgetByName(slot, childName) : nullptr;
@@ -480,7 +569,7 @@ void InvalidateWidgetHandles() noexcept {
 // qualified native buffers do not. Inspect only the current tree on the UI thread.
 // Never restore/write a buffer retained from a tree that has been replaced.
 bool ReconcileNativeWidgets() noexcept {
-    void* panel = FindTopLevelPanel != nullptr ? FindTopLevelPanel("buff-panel/BuffHud") : nullptr;
+    void* panel = FindTopLevelPanel != nullptr ? FindTopLevelPanel("buffhud/BuffHud") : nullptr;
     void* grid = (panel != nullptr && FindChildWidgetByName != nullptr)
         ? FindChildWidgetByName(panel, "BuffGrid")
         : nullptr;
@@ -562,6 +651,14 @@ bool ReconcileNativeWidgets() noexcept {
     NativeHudPanel = panel;
     EmptySlotsHidden = (panel != nullptr);
     if (changed) {
+        // A rebuilt or reset tree shows its placeholders again; the render
+        // re-applies the checkbox and hover box from scratch.
+        (void)SetVisible(AuraCheck, false);
+        for (const auto box : HoverBoxes) (void)SetVisible(box, false);
+        AuraCheckShown = false;
+        AuraCheckFrame = std::numeric_limits<std::uint16_t>::max();
+        HoverBoxShown = -1;
+        HoverBuffers = {};
         (void)ApplyInputIsolation();
         LastRenderedRevision = std::numeric_limits<std::uint64_t>::max();
         LastRenderedGameFrame = NoRenderedSeconds;
@@ -797,21 +894,41 @@ bool ReconcileNativeWidgets() noexcept {
 }
 
 void ClearTooltip(std::size_t slotIndex) noexcept {
-    if (slotIndex >= SlotCount) return;
+    if (slotIndex >= SlotCount || Handles[slotIndex].tooltip == D2RL::Widgets::InvalidHandle) return;
     (void)SetVisible(Handles[slotIndex].tooltip, false);
     if (WriteTooltipText(slotIndex, "")) {
         RenderStates[slotIndex].tooltipVisible = false;
     }
 }
 
+[[nodiscard]] const char* ToggleTooltip(Core::BuffToggle toggle) noexcept {
+    switch (toggle) {
+    // Hover box text: fits the widest box (about 36 characters).
+    case Core::BuffToggle::On:
+        return "Blood Golem Aura: click to turn off";
+    case Core::BuffToggle::Off:
+        return "Blood Golem Aura: click to turn on";
+    case Core::BuffToggle::Unavailable:
+        return "Blood Golem Aura";
+    default:
+        return nullptr;
+    }
+}
+
 void ApplyTooltip(
     std::size_t slotIndex,
-    std::int32_t sourceSkillId) noexcept {
+    std::int32_t sourceSkillId,
+    const char* text = nullptr) noexcept {
     if (slotIndex >= SlotCount || !ResolveWidgetHandles()) return;
+    // Names on hover come from HoverLabel; only a layout override that still
+    // has per-slot Tooltip widgets gets native hover text.
+    if (Handles[slotIndex].tooltip == D2RL::Widgets::InvalidHandle) return;
 
     (void)SetVisible(Handles[slotIndex].tooltip, false);
     char localizedName[TooltipReserveBytes]{};
-    if (sourceSkillId == Core::NoSourceSkillId
+    if (text != nullptr) {
+        std::snprintf(localizedName, sizeof(localizedName), "%s", text);
+    } else if (sourceSkillId == Core::NoSourceSkillId
         || !Internal::TryResolveSkillName(sourceSkillId, localizedName, sizeof(localizedName))) {
         ClearTooltip(slotIndex);
         return;
@@ -936,7 +1053,8 @@ void RenderSlot(
         || state.atlas != icon.atlas
         || state.requestedFrame != icon.frame
         || state.displayMode != entry.displayMode
-        || state.sourceSkillId != entry.sourceSkillId;
+        || state.sourceSkillId != entry.sourceSkillId
+        || state.toggle != entry.toggle;
 
     if (assignmentChanged) {
         (void)SetVisible(Handles[slotIndex].slot, false);
@@ -955,9 +1073,23 @@ void RenderSlot(
         state.maximumValue = NoRenderedValue;
         state.timerVisible = false;
         state.tooltipVisible = false;
-        ApplyTooltip(slotIndex, entry.sourceSkillId);
+        state.toggle = entry.toggle;
+        ApplyTooltip(slotIndex, entry.sourceSkillId, ToggleTooltip(entry.toggle));
         state.visible = true;
         (void)SetVisible(Handles[slotIndex].slot, true);
+    }
+
+    // A switchable entry never counts down; its label says only when it is off.
+    if (entry.toggle != Core::BuffToggle::None) {
+        const bool off = entry.toggle == Core::BuffToggle::Off;
+        if (off && !state.timerVisible && WriteCountdownText(slotIndex, "OFF")) {
+            (void)SetVisible(Handles[slotIndex].countdown, true);
+            state.timerVisible = true;
+        } else if (!off && state.timerVisible) {
+            (void)SetVisible(Handles[slotIndex].countdown, false);
+            state.timerVisible = false;
+        }
+        return;
     }
 
     if (entry.displayMode == Core::BuffDisplayMode::Resource) {
@@ -1026,9 +1158,205 @@ void RenderSlot(
     return true;
 }
 
+// Diagnostics: each change to what the HUD shows, bounded per game.
+constexpr std::uint32_t MaximumDisplayLogLines = 300;
+std::uint32_t DisplayLogLines{};
+
+void LogDisplay(const Core::BuffDisplaySnapshot& snapshot,
+    const std::array<Core::BuffDisplayEntry, Core::MaximumPublishedBuffs>& ordered,
+    std::size_t count, std::uint32_t nowFrame, bool hasClock) noexcept {
+    if (Context == nullptr || DisplayLogLines >= MaximumDisplayLogLines) return;
+    ++DisplayLogLines;
+    char line[1024]{};
+    int used = std::snprintf(line, sizeof(line), "Buff HUD: display revision %llu session %llu frame %u%s: %zu entr%s",
+        static_cast<unsigned long long>(snapshot.revision), static_cast<unsigned long long>(snapshot.sessionGeneration),
+        nowFrame, hasClock ? "" : " (no clock)", count, count == 1 ? "y" : "ies");
+    for (std::size_t i = 0; i < count && used > 0 && used < static_cast<int>(sizeof(line)) - 64; ++i) {
+        const auto& entry = ordered[i];
+        used += std::snprintf(line + used, sizeof(line) - static_cast<std::size_t>(used),
+            "%s skill=%d %s expire=%u value=%d toggle=%u", i == 0 ? ":" : ";", entry.sourceSkillId,
+            entry.displayMode == Core::BuffDisplayMode::Resource ? "resource" : "timer",
+            entry.expireGameFrame, entry.currentValue, static_cast<unsigned>(entry.toggle));
+    }
+    Context->LogInfo(line);
+}
+
+// UI thread. Adds, updates or removes the Blood Golem aura's entry; touches the
+// display bus only when something changed, so an idle HUD stays idle.
+void SyncBloodAuraEntry() noexcept {
+    const auto snapshot = Core::BuffDisplays().Snapshot();
+    const Core::BuffDisplayEntry* existing = nullptr;
+    for (std::size_t i = 0; i < snapshot.count; ++i) {
+        if (snapshot.entries[i].key == BloodAuraKey) {
+            existing = &snapshot.entries[i];
+            break;
+        }
+    }
+    // Switched off, the aura's stats are suppressed on the server and the client
+    // loses the state (seen in game 2026-10-28), so the slot stays while it is
+    // off: otherwise there would be nothing left to click to turn it back on.
+    const bool switchedOff = BloodAura::LocalAuraOff() && BloodAura::CanToggle();
+    if (!BloodAura::LocalPlayerInAura() && !switchedOff) {
+        if (existing != nullptr) (void)Core::BuffDisplays().Remove(BloodAuraKey);
+        return;
+    }
+    const auto toggle = !BloodAura::CanToggle() ? Core::BuffToggle::Unavailable
+        : BloodAura::LocalAuraOff() ? Core::BuffToggle::Off
+        : Core::BuffToggle::On;
+    if (existing != nullptr && existing->toggle == toggle) return;
+    Core::BuffDisplayEntry entry{};
+    entry.key = BloodAuraKey;
+    entry.sourceSkillId = BloodAura::IconSkillId;
+    entry.displayMode = Core::BuffDisplayMode::Timer;
+    entry.expireGameFrame = 0;
+    entry.stacks = 1;
+    entry.priority = BloodAuraPriority;
+    entry.toggle = toggle;
+    (void)Core::BuffDisplays().Upsert(entry);
+}
+
+// UI thread. A slot's square in HD layout units from the panel anchor.
+[[nodiscard]] HudInput::SlotArea SlotLayoutArea(std::size_t index) noexcept {
+    D2RL::Widgets::Rect grid{};
+    D2RL::Widgets::Rect slot{};
+    if (Widgets->getWidgetRect == nullptr
+        || Widgets->getWidgetRect(Context, GridWidget, &grid) != D2RL::Widgets::Result::Success
+        || Widgets->getWidgetRect(Context, Handles[index].slot, &slot) != D2RL::Widgets::Result::Success
+        || slot.width <= 0) {
+        grid = GridFallbackRect;
+        slot = D2RL::Widgets::Rect{
+            static_cast<std::int32_t>(index % SlotsPerRow) * SlotFallbackPitchX,
+            SlotFallbackBottomY - static_cast<std::int32_t>(index / SlotsPerRow) * SlotFallbackPitchY,
+            SlotFallbackEdge,
+            SlotFallbackEdge,
+        };
+    }
+    return HudInput::SlotArea{
+        .visible = true,
+        .x = static_cast<float>(grid.x + slot.x),
+        .y = static_cast<float>(grid.y + slot.y),
+        .size = static_cast<float>(slot.width),
+    };
+}
+
+// UI thread. Slot 0's checkbox: shown ticked (aura on) or empty (off) while the
+// aura holds slot 0, hidden otherwise.
+void ShowAuraCheck(bool shown, bool checked) noexcept {
+    if (AuraCheck == D2RL::Widgets::InvalidHandle) return;
+    if (shown) {
+        const auto frame = checked ? CheckedFrame : UncheckedFrame;
+        if (AuraCheckFrame != frame
+            && Internal::TryApplyIconFrame(ResolveNativeSlotChild(0, "AuraCheck"), frame, CheckedFrame)) {
+            AuraCheckFrame = frame;
+        }
+    }
+    if (AuraCheckShown != shown && SetVisible(AuraCheck, shown)) AuraCheckShown = shown;
+}
+
+// UI thread. Writes a hover box's text in place over its JSON reserve, the way
+// WriteCountdownText writes a countdown.
+[[nodiscard]] bool WriteHoverText(std::size_t box, const char* text) noexcept {
+    const auto length = std::strlen(text);
+    if (box >= HoverBoxCount || length + 1 > HoverReserveBytes
+        || FindTopLevelPanel == nullptr || FindChildWidgetByName == nullptr) {
+        return false;
+    }
+    char name[16]{};
+    std::snprintf(name, sizeof(name), "HoverBox%zu%c", box / HoverSizes.size(), HoverSizes[box % HoverSizes.size()]);
+    void* panel = FindTopLevelPanel("buffhud/BuffHud");
+    void* grid = panel != nullptr ? FindChildWidgetByName(panel, "BuffGrid") : nullptr;
+    void* frame = grid != nullptr ? FindChildWidgetByName(grid, name) : nullptr;
+    void* label = frame != nullptr ? FindChildWidgetByName(frame, "Text") : nullptr;
+    std::uintptr_t pointer{};
+    if (label == nullptr || !ReadNativeField(label, Native::Contract::HudTextPointerOffset, pointer) || pointer == 0) {
+        return false;
+    }
+    auto* buffer = reinterpret_cast<char*>(pointer);
+    if (!IsWritableRange(buffer, HoverReserveBytes)) return false;
+    if (pointer != HoverBuffers[box]) {
+        // A new widget tree: only a buffer still holding the reserve is ours.
+        if (std::memcmp(buffer, HoverReserve, HoverReserveBytes) != 0) return false;
+        HoverBuffers[box] = pointer;
+    }
+    std::memcpy(buffer, HoverReserve, HoverReserveBytes);
+    std::memcpy(buffer, text, length + 1);
+    return true;
+}
+
+// Which box: the width that fits `length` characters, over the top occupied
+// row (slots fill the bottom row, 0-6, first; row 2 is the bottom one).
+[[nodiscard]] std::size_t HoverBoxFor(std::size_t length, std::size_t occupiedSlots) noexcept {
+    const auto topSlot = occupiedSlots == 0 ? 0 : occupiedSlots - 1;
+    const auto row = HoverRows - 1 - std::min(topSlot / SlotsPerRow, HoverRows - 1);
+    const std::size_t size = length <= HoverSizeLimits[0] ? 0 : length <= HoverSizeLimits[1] ? 1 : 2;
+    return row * HoverSizes.size() + size;
+}
+
+// UI thread (HudInput's hover callback, and after a render): names the buff in
+// the hovered slot in a tooltip box above the slots, or hides it.
+void __cdecl ShowHover(int slot) noexcept {
+    if (!HandlesResolved) return;
+    HoverSlotShown = slot;
+    char text[HoverReserveBytes]{};
+    if (slot >= 0 && static_cast<std::size_t>(slot) < SlotEntryCount) {
+        const auto& entry = SlotEntries[static_cast<std::size_t>(slot)];
+        if (const char* toggleText = ToggleTooltip(entry.toggle); toggleText != nullptr) {
+            std::snprintf(text, sizeof(text), "%s", toggleText);
+        } else if (entry.sourceSkillId != Core::NoSourceSkillId) {
+            char name[TooltipReserveBytes]{};
+            if (Internal::TryResolveSkillName(entry.sourceSkillId, name, sizeof(name))) {
+                std::size_t length = std::min(std::strlen(name), HoverReserveBytes - 1);
+                // Never cut a UTF-8 character in half.
+                while (length > 0 && length < std::strlen(name)
+                    && (static_cast<unsigned char>(name[length]) & 0xC0u) == 0x80u) {
+                    --length;
+                }
+                std::memcpy(text, name, length);
+                text[length] = '\0';
+            }
+        }
+    }
+    int box = -1;
+    if (text[0] != '\0') {
+        const auto candidate = HoverBoxFor(std::strlen(text), SlotEntryCount);
+        if (HoverBoxes[candidate] != D2RL::Widgets::InvalidHandle && WriteHoverText(candidate, text)) {
+            box = static_cast<int>(candidate);
+        }
+    }
+    if (box == HoverBoxShown) return;
+    if (HoverBoxShown >= 0) (void)SetVisible(HoverBoxes[static_cast<std::size_t>(HoverBoxShown)], false);
+    if (box >= 0 && !SetVisible(HoverBoxes[static_cast<std::size_t>(box)], true)) box = -1;
+    HoverBoxShown = box;
+}
+
+// UI thread. Tells HudInput where the shown slots are and which one is the
+// aura's, places the checkbox, and refreshes a hover label left over a slot
+// whose buff changed.
+void PublishSlotInput(const std::array<Core::BuffDisplayEntry, Core::MaximumPublishedBuffs>& ordered,
+    std::size_t visibleCount) noexcept {
+    HudInput::SlotAreas areas{};
+    int toggleSlot = -1;
+    bool checked = false;
+    SlotEntryCount = visibleCount;
+    for (std::size_t i = 0; i < visibleCount; ++i) {
+        SlotEntries[i] = ordered[i];
+        areas[i] = SlotLayoutArea(i);
+        const auto toggle = ordered[i].toggle;
+        if (toggleSlot < 0 && (toggle == Core::BuffToggle::On || toggle == Core::BuffToggle::Off)) {
+            toggleSlot = static_cast<int>(i);
+            checked = toggle == Core::BuffToggle::On;
+        }
+    }
+    // The checkbox exists only in slot 0, which the aura's top priority keeps.
+    ShowAuraCheck(toggleSlot == 0, checked);
+    HudInput::Publish(areas, toggleSlot);
+    if (HoverSlotShown >= 0) ShowHover(HoverSlotShown);
+}
+
 void RenderSnapshot() noexcept {
     if (!ResolveWidgetHandles()) return;
     const bool reconciled = ReconcileNativeWidgets();
+    SyncBloodAuraEntry();
 
     auto snapshot = Core::BuffDisplays().Snapshot();
     std::uint32_t nowFrame{};
@@ -1059,6 +1387,13 @@ void RenderSnapshot() noexcept {
                 if (Core::BuffDisplays().Remove(expired[i])) {
                 }
             }
+            if (DisplayLogLines < MaximumDisplayLogLines) {
+                ++DisplayLogLines;
+                char line[160]{};
+                std::snprintf(line, sizeof(line), "Buff HUD: display dropped %zu expired entr%s at frame %u (first key 0x%llX).",
+                    expiredCount, expiredCount == 1 ? "y" : "ies", nowFrame, static_cast<unsigned long long>(expired[0]));
+                Context->LogInfo(line);
+            }
             snapshot = Core::BuffDisplays().Snapshot();
             if (snapshot.count == 0 && !snapshot.hasGameFrame) {
             }
@@ -1076,11 +1411,14 @@ void RenderSnapshot() noexcept {
             return lhs.sequence < rhs.sequence;
         });
 
+    if (snapshot.revision != LastRenderedRevision) LogDisplay(snapshot, ordered, orderedCount, nowFrame, hasClock);
+
     const auto visibleCount = std::min<std::size_t>(orderedCount, SlotCount);
     for (std::size_t i = 0; i < visibleCount; ++i) {
         RenderSlot(i, ordered[i], nowFrame, hasClock);
     }
     for (std::size_t i = visibleCount; i < SlotCount; ++i) HideSlot(i);
+    PublishSlotInput(ordered, visibleCount);
 
     LastRenderedRevision = snapshot.revision;
     LastRenderedGameFrame = nowFrame;
@@ -1096,6 +1434,7 @@ void __cdecl PollOnUiThread(const D2RL::PluginContext* context, void*) noexcept 
         return;
     }
 
+    BuffTracker::TickRemoteClock();
     RenderSnapshot();
     QueuePoll();
 }
@@ -1128,14 +1467,25 @@ void OpenPanel() noexcept {
     }
     InvalidateWidgetHandles();
     if (ResolveWidgetHandles()) {
+        // The layout's "visible": false does not survive a panel open; hide every
+        // placeholder explicitly (seen in game 2026-10-28: all nine hover boxes
+        // showed their reserve text until this was done).
         for (std::size_t i = 0; i < SlotCount; ++i) {
             (void)SetVisible(Handles[i].slot, false);
             ClearTooltip(i);
         }
+        (void)SetVisible(AuraCheck, false);
+        for (const auto box : HoverBoxes) (void)SetVisible(box, false);
     }
 }
 
 void ClosePanel() noexcept {
+    HudInput::Publish({}, -1);
+    for (const auto buffer : HoverBuffers) {
+        if (buffer != 0 && IsWritableRange(reinterpret_cast<void*>(buffer), HoverReserveBytes)) {
+            std::memcpy(reinterpret_cast<void*>(buffer), HoverReserve, HoverReserveBytes);
+        }
+    }
     RestoreQualifiedCountdownBuffers();
     RestoreQualifiedTooltipBuffers();
     if (Context != nullptr && Panels != nullptr
@@ -1217,11 +1567,13 @@ void __cdecl OnGameplayEvent(
         Core::BuffDisplays().BeginSession(event->sessionGeneration);
         break;
     case D2RL::Lifecycle::GameplayEventKind::LocalPlayerReady:
+        DisplayLogLines = 0;
         if (CurrentSessionGeneration.load(std::memory_order_acquire) != event->sessionGeneration) {
             CurrentSessionGeneration.store(event->sessionGeneration, std::memory_order_release);
             Core::BuffDisplays().BeginSession(event->sessionGeneration);
         }
         OpenPanel();
+        HudInput::InstallInput();
         QueuePoll();
         if (!Internal::SkillIconStatus().ready && Threads != nullptr) {
             (void)Threads->runOnGameThread(Context, &RebuildIconsOnGameThread, nullptr);
@@ -1244,7 +1596,7 @@ void PrintStatus(const D2RL::PluginContext* context) noexcept {
     const auto icons = Internal::SkillIconStatus();
     char line[512]{};
     std::snprintf(line, sizeof(line),
-        "Buff HUD 1.1.2: displayed=%zu/%zu session=%llu frame=%u panel=%s companion=enabled skillIcons=%s skillNames=%s tableRevision=%llu inputIsolation=enabled.",
+        "Buff HUD 1.3.1+rev.3: displayed=%zu/%zu session=%llu frame=%u panel=%s companion=enabled skillIcons=%s skillNames=%s tableRevision=%llu inputIsolation=enabled.",
         snapshot.count, SlotCount,
         static_cast<unsigned long long>(snapshot.sessionGeneration),
         snapshot.currentGameFrame,
@@ -1253,6 +1605,18 @@ void PrintStatus(const D2RL::PluginContext* context) noexcept {
         icons.namesReady ? "ready" : "not-qualified",
         static_cast<unsigned long long>(icons.tableRevision));
     context->WriteConsoleMessage(line);
+    context->LogInfo(line);
+    char input[256]{};
+    HudInput::Describe(input, sizeof(input));
+    std::snprintf(line, sizeof(line), "Blood Golem aura: inAura=%s canToggle=%s off=%s checkbox=%s/%s hoverBoxes=%s; %s",
+        BloodAura::LocalPlayerInAura() ? "yes" : "no", BloodAura::CanToggle() ? "yes" : "no",
+        BloodAura::LocalAuraOff() ? "yes" : "no", AuraCheck != D2RL::Widgets::InvalidHandle ? "found" : "missing",
+        AuraCheckShown ? (AuraCheckFrame == CheckedFrame ? "ticked" : "empty") : "hidden",
+        std::all_of(HoverBoxes.begin(), HoverBoxes.end(),
+            [](D2RL::Widgets::WidgetHandle handle) { return handle != D2RL::Widgets::InvalidHandle; })
+            ? "found" : "missing", input);
+    context->WriteConsoleMessage(line);
+    context->LogInfo(line);
 }
 
 D2RL::ConsoleCommandResult __cdecl BuffCommand(
@@ -1400,6 +1764,8 @@ bool Initialize(const D2RL::PluginContext* context) noexcept {
         return false;
     }
 
+    HudInput::Initialize(Context, &ShowHover);
+
     if (!Context->RegisterConsoleCommand(
             "buff-panel",
             &BuffCommand,
@@ -1407,11 +1773,12 @@ bool Initialize(const D2RL::PluginContext* context) noexcept {
         Context->LogWarn("Buff HUD: console command 'buff-panel' could not be registered.");
     }
     Context->LogInfo(
-        "Buff HUD 1.1.2 BuffHud initialized: 21 display-only slots, companion-resource layout, fixed gameplay input isolation, timer/resource rendering, and runtime skill icon/name resolution.");
+        "Buff HUD 1.3.1+rev.3 BuffHud initialized: 21 display-only slots, companion-resource layout, fixed gameplay input isolation, timer/resource rendering, and runtime skill icon/name resolution.");
     return true;
 }
 
 void Shutdown() noexcept {
+    HudInput::Shutdown();
     Core::BuffDisplays().EndSession();
     Internal::ResetSkillIconCache();
     Internal::ShutdownIconFrameBackend();

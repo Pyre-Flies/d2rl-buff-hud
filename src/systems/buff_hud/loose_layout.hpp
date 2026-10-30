@@ -8,7 +8,7 @@
 namespace BuffPanel::Systems::BuffHud::LooseLayout {
 
 inline constexpr std::string_view VirtualPath =
-    "data/global/ui/layouts/buff-panel/BuffHudhd.json";
+    "data/global/ui/layouts/buffhud/BuffHudhd.json";
 inline constexpr std::size_t MaximumBytes = 2u * 1024u * 1024u;
 
 enum class Source { Embedded, ActiveMod, InvalidOverride };
